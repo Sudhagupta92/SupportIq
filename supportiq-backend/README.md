@@ -1,258 +1,304 @@
-# SupportIQ Backend - Module 1: Foundation & Authentication
+# SupportIQ Backend - Module 1, 2 & 3: RAG Knowledge Base & Authentication
 
-SupportIQ is an AI-powered customer support agent platform for e-commerce. **Module 1** establishes the core backend foundation, PostgreSQL persistence with pgvector, Spring Security 6, and stateless JWT-based authentication.
+SupportIQ is an AI-powered customer support agent platform for e-commerce stores. 
+- **Module 1**: Core backend architecture, PostgreSQL persistence, Spring Security 6, and stateless JWT authentication.
+- **Module 2**: React + Vite frontend with role-based routing and customer/admin dashboards.
+- **Module 3**: Policy document ingestion, Apache PDFBox 3.x text extraction, boundary-aware chunking, Google Gemini embeddings (`gemini-embedding-001`), and PostgreSQL pgvector vector storage.
 
 ---
 
 ## 🛠️ Tech Stack & Requirements
 
 - **Java**: 17+ (LTS)
-- **Framework**: Spring Boot 3.3.x (Spring Web, Spring Security, Spring Data JPA, Bean Validation)
+- **Framework**: Spring Boot 3.3.5 (Spring Web, Spring Security, Spring Data JPA, Bean Validation)
+- **Spring AI**: 1.0.0 (`spring-ai-bom`, `spring-ai-starter-vector-store-pgvector`)
+- **Text Extraction**: Apache PDFBox 3.0.4 (`org.apache.pdfbox:pdfbox`)
 - **Database**: PostgreSQL 16 with `pgvector/pgvector:pg16`
+- **Embedding Provider**: Google Gemini (`gemini-embedding-001` with `outputDimensionality: 768`) behind Spring AI's `EmbeddingModel` interface
 - **Security & Tokens**: Spring Security 6 + JJWT 0.12.x (`jjwt-api`, `jjwt-impl`, `jjwt-jackson`)
-- **Build Tool**: Maven
+- **Build Tool**: Apache Maven
 
 ---
 
-## 🚀 Step-by-Step Setup & Running
+## 🧠 Embedding Model & Dimension Architecture
 
-### Step 1: Start Database with Docker Compose
+### Model Migration: `gemini-embedding-001`
+Google sunset `text-embedding-004` on 14 January 2026. SupportIQ uses the current official model **`gemini-embedding-001`**.
 
-Ensure Docker Desktop or Docker daemon is running on your machine, then run:
+### Dimensionality Reduction (3072 $\rightarrow$ 768) & L2 Normalization
+1. **Native vs Truncated Dimensions**: `gemini-embedding-001` outputs 3072 dimensions by default. SupportIQ utilizes Matryoshka Representation Learning (MRL) by transmitting `outputDimensionality: 768`.
+2. **Why 768?**: Truncating to 768 dimensions preserves vector database compatibility with our pgvector schema (`VECTOR(768)`), saves 75% in memory and index storage costs, and reduces similarity search latency while maintaining high semantic accuracy.
+3. **L2 Normalization**: The official Gemini API documentation specifies that when output dimensionality is reduced below 3072 on `gemini-embedding-001`, the vectors must be L2-normalized client-side to unit length ($\|v\|_2 = 1.0$). SupportIQ automatically calculates the Euclidean norm and normalizes all vectors before persisting to pgvector.
+4. **Runtime Verification**: `GeminiEmbeddingModel` verifies the returned vector length matches the configured dimension (768) and throws an immediate error if a mismatch is detected.
 
-```bash
-# Navigate to the project root
+### Task Types
+Downstream vector placement is optimized by sending explicit task types in the Gemini request:
+* **`RETRIEVAL_DOCUMENT`**: Applied when chunking and indexing policy document chunks into pgvector.
+* **`RETRIEVAL_QUERY`**: Applied when embedding search and retrieval queries (e.g. from the admin search testbed).
+
+---
+
+## ⚙️ Environment Variables Configuration
+
+SupportIQ uses strict environment-variable-first configuration. **Never commit API keys into source control.**
+
+| Environment Variable | Description | Default Value | Notes |
+| :--- | :--- | :--- | :--- |
+| `GEMINI_API_KEY` | Google Gemini API Key | *(None - Required for live embeddings)* | Obtain from Google AI Studio. Sent via `x-goog-api-key` header only. |
+| `GEMINI_EMBEDDING_MODEL`| Gemini embedding model name | `gemini-embedding-001` | Active model; overrides `text-embedding-004` |
+| `VECTOR_DIMENSION` | Dimension of embedding vectors | `768` | **MUST match pgvector column and outputDimensionality** |
+| `CHUNK_SIZE` | Target chunk character count | `800` | Natural boundary splitting |
+| `CHUNK_OVERLAP` | Target chunk overlap chars | `100` | Context boundary continuity |
+| `MAX_FILE_SIZE` | Maximum upload file size | `10485760` (10 MB) | Enforced on client and server |
+| `DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/supportiq` | |
+| `DB_USERNAME` | Database username | `postgres` | |
+| `DB_PASSWORD` | Database password | `postgres` | |
+| `JWT_SECRET` | Secret key for signing HMAC-SHA JWTs | 512-bit hex key | >= 256 bits |
+| `JWT_EXPIRATION_MS` | JWT validity duration in ms | `86400000` (24 hours) | |
+| `ADMIN_EMAIL` | Default seeded admin email | `admin@supportiq.com` | |
+| `ADMIN_PASSWORD` | Default seeded admin password | `Admin@12345` | |
+
+---
+
+## 🚀 Setting Environment Variables in Windows PowerShell
+
+Open a PowerShell terminal in `supportiq-backend` and execute:
+
+```powershell
+# 1. Set Google Gemini API Key (Required for live vector ingestion)
+$env:GEMINI_API_KEY="AIzaSyYourGeminiApiKeyHere"
+
+# 2. Embedding Model (defaults to gemini-embedding-001)
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
+
+# 3. Vector Dimension (must match pgvector schema)
+$env:VECTOR_DIMENSION="768"
+
+# 4. Chunking parameters (defaults: 800 and 100)
+$env:CHUNK_SIZE="800"
+$env:CHUNK_OVERLAP="100"
+
+# Verify the environment variable is set
+Get-ChildItem env:GEMINI_API_KEY
+```
+
+---
+
+## 🐳 Step-by-Step Setup & Running
+
+### Step 1: Start PostgreSQL with pgvector Container
+Ensure Docker Desktop is running:
+
+```powershell
 cd supportiq-backend
-
-# Start the pgvector PostgreSQL container in detached mode
 docker compose up -d
 ```
 
-> **Database Details:**
-> - **Host**: `localhost:5432`
-> - **Database Name**: `supportiq`
-> - **Username**: `postgres`
-> - **Password**: `postgres`
-> - **Volume**: `postgres_data` (persisted on disk)
+The container starts with:
+- Image: `pgvector/pgvector:pg16`
+- Port: `5432:5432`
+- Database: `supportiq`
+- Schema: Spring AI with `initialize-schema: true` automatically creates the `vector_store` table with `VECTOR(768)`. Hibernate creates `policy_documents` and `users`. An explicit SQL migration script is also available in `src/main/resources/schema-pgvector.sql`.
 
-### Step 2: Configure Environment Variables (Optional)
-
-Sensible defaults are pre-configured in `src/main/resources/application.yml`. If you wish to override them:
-
-| Variable | Description | Default Value |
-| :--- | :--- | :--- |
-| `DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/supportiq` |
-| `DB_USERNAME` | Database username | `postgres` |
-| `DB_PASSWORD` | Database password | `postgres` |
-| `JWT_SECRET` | Secret key for signing HMAC-SHA tokens (>= 32 chars) | Built-in 512-bit hex key |
-| `JWT_EXPIRATION_MS`| JWT validity duration in milliseconds | `86400000` (24 hours) |
-| `ADMIN_EMAIL` | Default administrator account email | `admin@supportiq.com` |
-| `ADMIN_PASSWORD` | Default administrator account password | `Admin@12345` |
-
-### Step 3: Build & Run the Spring Boot Application
-
-Using Maven:
-
-```bash
-# Clean and compile
+### Step 2: Build & Run the Backend
+```powershell
+# Clean, test, and package
 mvn clean install
 
 # Run the Spring Boot application
 mvn spring-boot:run
 ```
 
-The application will start on **`http://localhost:8080`**.
-
-> **Automatic Admin Seeding**: On the initial startup, `DataInitializer` automatically detects if an administrator account exists. If not, it creates `admin@supportiq.com` with password `Admin@12345` and role `ADMIN`.
+The backend starts on **`http://localhost:8080`**.
 
 ---
 
-## 📡 API Endpoints & Testing with cURL / Postman
+## 📡 API Reference & Testing (cURL & PowerShell)
 
-### 1. Register a New Customer
+### Step 0: Obtain an Admin JWT Token
 
-- **Endpoint**: `POST /api/auth/register`
-- **Access**: Public
-- **Validation**:
-  - `name`: Not blank, 2-100 characters
-  - `email`: Valid email format
-  - `password`: Minimum 8 characters
-- **Security Rule**: Role is **always** assigned to `CUSTOMER`. Clients cannot escalate their role.
+Both cURL and PowerShell examples below require an Admin token:
 
-#### cURL Request:
+#### PowerShell:
+```powershell
+$loginBody = @{
+    email = "admin@supportiq.com"
+    password = "Admin@12345"
+} | ConvertTo-Json
+
+$loginResponse = Invoke-RestMethod -Uri "http://localhost:8080/api/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
+$adminToken = $loginResponse.token
+Write-Host "Admin Token: $adminToken"
+```
+
+#### cURL:
 ```bash
-curl -X POST http://localhost:8080/api/auth/register \
+curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Jane Doe",
-    "email": "jane@example.com",
-    "password": "Password123"
-  }'
+  -d '{"email":"admin@supportiq.com","password":"Admin@12345"}'
+```
+
+---
+
+### 1. Upload Policy PDF (`POST /api/admin/documents`)
+- **Access**: `ADMIN` role only
+- **Content-Type**: `multipart/form-data`
+- **Field**: `file`
+- **Validations**: Real PDF (`%PDF` magic header), maximum 10 MB, non-empty, contains extractable text.
+
+#### PowerShell:
+```powershell
+$filePath = "..\docs\sample-return-policy.pdf" # path to your PDF
+$uri = "http://localhost:8080/api/admin/documents"
+
+$form = @{
+    file = Get-Item -Path $filePath
+}
+
+$response = Invoke-RestMethod -Uri $uri -Method Post -Headers @{ Authorization = "Bearer $adminToken" } -Form $form
+$response | ConvertTo-Json
+```
+
+#### cURL:
+```bash
+curl -X POST http://localhost:8080/api/admin/documents \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F "file=@/path/to/return-policy.pdf"
 ```
 
 #### Success Response (`201 Created`):
 ```json
 {
   "id": 1,
-  "name": "Jane Doe",
-  "email": "jane@example.com",
-  "role": "CUSTOMER",
-  "createdAt": "2026-10-21T00:15:30"
-}
-```
-
-#### Duplicate Email Error (`409 Conflict`):
-```json
-{
-  "timestamp": "2026-10-21T00:15:45",
-  "status": 409,
-  "error": "Conflict",
-  "message": "Email is already registered: jane@example.com",
-  "path": "/api/auth/register"
+  "filename": "return-policy.pdf",
+  "contentType": "application/pdf",
+  "sizeBytes": 154200,
+  "pageCount": 3,
+  "chunkCount": 12,
+  "status": "READY",
+  "errorMessage": null,
+  "uploadedBy": 1,
+  "createdAt": "2026-10-22T08:30:00"
 }
 ```
 
 ---
 
-### 2. Login & Obtain JWT Token
+### 2. List Policy Documents (`GET /api/admin/documents`)
+- **Access**: `ADMIN` role only
+- Returns all documents ordered newest first.
 
-- **Endpoint**: `POST /api/auth/login`
-- **Access**: Public
+#### PowerShell:
+```powershell
+$docs = Invoke-RestMethod -Uri "http://localhost:8080/api/admin/documents" -Method Get -Headers @{ Authorization = "Bearer $adminToken" }
+$docs | Format-Table id, filename, pageCount, chunkCount, status, sizeBytes
+```
 
-#### cURL Request (Customer):
+#### cURL:
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X GET http://localhost:8080/api/admin/documents \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+---
+
+### 3. Test Vector Retrieval Search (`POST /api/admin/documents/search`)
+- **Access**: `ADMIN` role only
+- Performs similarity search across indexed chunks using `RETRIEVAL_QUERY` task type.
+
+#### PowerShell:
+```powershell
+$searchBody = @{
+    query = "What is the return policy for footwear and sneakers?"
+    topK = 4
+} | ConvertTo-Json
+
+$results = Invoke-RestMethod -Uri "http://localhost:8080/api/admin/documents/search" -Method Post -ContentType "application/json" -Headers @{ Authorization = "Bearer $adminToken" } -Body $searchBody
+$results | Format-Table filename, pageNumber, chunkIndex, similarityScore
+```
+
+#### cURL:
+```bash
+curl -X POST http://localhost:8080/api/admin/documents/search \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "jane@example.com",
-    "password": "Password123"
+    "query": "What is the return policy for footwear and sneakers?",
+    "topK": 4
   }'
 ```
 
 #### Success Response (`200 OK`):
 ```json
-{
-  "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiQ1VTVE9NRVIiLCJ1c2VySWQiOjEsInN1YiI6ImphbmVAZXhhbXBsZS5jb20iLCJpYXQiOjE3OTI1OTY5MzAsImV4cCI6MTc5MjY4MzMzMH0...",
-  "tokenType": "Bearer",
-  "user": {
-    "id": 1,
-    "name": "Jane Doe",
-    "email": "jane@example.com",
-    "role": "CUSTOMER",
-    "createdAt": "2026-10-21T00:15:30"
+[
+  {
+    "documentId": 1,
+    "filename": "return-policy.pdf",
+    "pageNumber": 1,
+    "chunkIndex": 2,
+    "similarityScore": 0.884,
+    "text": "Footwear must be returned inside the original protective shoebox with no scuffs or marks on the outer soles. Standard return window is thirty days."
   }
-}
-```
-
-#### Bad Credentials Error (`401 Unauthorized`):
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "jane@example.com",
-    "password": "WrongPassword!"
-  }'
-```
-
-```json
-{
-  "timestamp": "2026-10-21T00:16:00",
-  "status": 401,
-  "error": "Unauthorized",
-  "message": "Invalid email or password.",
-  "path": "/api/auth/login"
-}
+]
 ```
 
 ---
 
-### 3. Get Current User Profile (`/me`)
+### 4. Delete Document & Purge Vectors (`DELETE /api/admin/documents/{id}`)
+- **Access**: `ADMIN` role only
+- Deletes the metadata row and purges all associated vector chunks from `vector_store`.
 
-- **Endpoint**: `GET /api/auth/me`
-- **Access**: Any authenticated user (Requires `Authorization: Bearer <token>`)
+#### PowerShell:
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/api/admin/documents/1" -Method Delete -Headers @{ Authorization = "Bearer $adminToken" }
+```
 
-#### cURL Request:
+#### cURL:
 ```bash
-curl -X GET http://localhost:8080/api/auth/me \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+curl -X DELETE http://localhost:8080/api/admin/documents/1 \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-#### Success Response (`200 OK`):
-```json
-{
-  "id": 1,
-  "name": "Jane Doe",
-  "email": "jane@example.com",
-  "role": "CUSTOMER",
-  "createdAt": "2026-10-21T00:15:30"
-}
-```
-
-#### Missing or Invalid Token Error (`401 Unauthorized`):
-```json
-{
-  "timestamp": "2026-10-21T00:16:30",
-  "status": 401,
-  "error": "Unauthorized",
-  "message": "Full authentication is required to access this resource.",
-  "path": "/api/auth/me"
-}
-```
+Response: `204 No Content` (or `404 Not Found` if id does not exist).
 
 ---
 
-### 4. Admin Health Ping (`/admin/ping`)
+## 🛡️ Error Handling & Status Codes
 
-- **Endpoint**: `GET /api/admin/ping`
-- **Access**: Requires `ADMIN` role
-
-#### Step 4a: Login as Administrator:
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "admin@supportiq.com",
-    "password": "Admin@12345"
-  }'
-```
-
-#### Step 4b: Access Admin Ping with Admin Token:
-```bash
-curl -X GET http://localhost:8080/api/admin/ping \
-  -H "Authorization: Bearer ADMIN_JWT_TOKEN_HERE"
-```
-
-#### Success Response (`200 OK`):
+All errors return the global standard JSON error response:
 ```json
 {
-  "message": "Admin access confirmed. Pong!",
-  "status": "UP",
-  "role": "ADMIN"
+  "timestamp": "2026-10-22T08:35:10",
+  "status": 502,
+  "error": "Bad Gateway",
+  "message": "Embedding model not available. Check GEMINI_EMBEDDING_MODEL and the API key",
+  "path": "/api/admin/documents"
 }
 ```
 
-#### Forbidden Error (`403 Forbidden` - if requested with a CUSTOMER token):
-```json
-{
-  "timestamp": "2026-10-21T00:17:00",
-  "status": 403,
-  "error": "Forbidden",
-  "message": "Access denied: You do not have the necessary permissions to access this resource.",
-  "path": "/api/admin/ping"
-}
-```
+| HTTP Status | Condition | Example Trigger / Message |
+| :--- | :--- | :--- |
+| `400 Bad Request` | Invalid file or params | Uploading a `.txt` file disguised as `.pdf` (invalid magic bytes) |
+| `401 Unauthorized` | Missing / invalid JWT or API key | Calling endpoint without token, or missing/invalid `GEMINI_API_KEY` |
+| `403 Forbidden` | Insufficient role | Accessing `/api/admin/**` with a `CUSTOMER` role JWT |
+| `404 Not Found` | Document not found | `DELETE /api/admin/documents/999999` |
+| `413 Payload Too Large` | Exceeds 10 MB | Uploading a PDF larger than 10,485,760 bytes |
+| `422 Unprocessable` | No extractable text | Uploading a scanned image-only PDF |
+| `502 Bad Gateway` | Model unavailable / 404 / 403 | `"Embedding model not available. Check GEMINI_EMBEDDING_MODEL and the API key"` |
 
 ---
 
-## 🧪 Running Automated Tests
+## 🧪 Automated Testing
 
-The test suite runs with an isolated in-memory H2 database in PostgreSQL compatibility mode, meaning no live Docker service is required to execute tests.
+Automated tests run with an isolated in-memory H2 database (PostgreSQL mode) and a mocked Spring AI `EmbeddingModel` so **no real API key or running database is required to run the test suite**.
 
-```bash
+```powershell
 mvn test
 ```
 
-Tests verify:
-1. Registration success with 201 status and password exclusion
-2. Duplicate email attempts triggering 409 Conflict
-3. Successful authentication returning valid Bearer JWT and user details
+### Test Coverage Highlights:
+- **`GeminiEmbeddingModelTest`**: Tests default model `gemini-embedding-001`, `outputDimensionality: 768`, dimension mismatch checking, L2 normalization to unit length, task types (`RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY`), 404/403 mapping to clear messages, and header authentication.
+- **`GeminiEmbeddingModelIntegrationTest`**: Optional live integration test against real Google Gemini API. Automatically skipped when `GEMINI_API_KEY` is not present.
+- **`ChunkingServiceTest`**: Tests 800-char chunking with 100-char overlap, boundary splitting at paragraph/sentence markers, empty text skipping, and page number tracking.
+- **`PdfTextExtractorTest`**: Tests Apache PDFBox 3.x text extraction, `%PDF` magic byte enforcement, non-PDF rejection, scanned image (blank text) detection, and file size limits.
+- **`DocumentAdminControllerTest`**: Tests RBAC (403 for CUSTOMER), invalid format (400), scanned PDF (422), oversized file (413), upload (201), list (200), search (200), and delete (204 / 404).

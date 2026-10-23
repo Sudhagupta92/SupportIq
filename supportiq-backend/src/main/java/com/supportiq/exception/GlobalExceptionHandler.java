@@ -123,6 +123,93 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
+    @ExceptionHandler(InvalidPdfException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidPdfException(
+            InvalidPdfException ex,
+            HttpServletRequest request) {
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    @ExceptionHandler({FileTooLargeException.class, org.springframework.web.multipart.MaxUploadSizeExceededException.class})
+    public ResponseEntity<ErrorResponse> handleFileTooLargeException(
+            Exception ex,
+            HttpServletRequest request) {
+
+        String msg = ex instanceof FileTooLargeException ? ex.getMessage() : "File size exceeds the maximum allowed limit of 10 MB.";
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.PAYLOAD_TOO_LARGE.value())
+                .error(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase())
+                .message(msg)
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
+    }
+
+    @ExceptionHandler(NoExtractableTextException.class)
+    public ResponseEntity<ErrorResponse> handleNoExtractableTextException(
+            NoExtractableTextException ex,
+            HttpServletRequest request) {
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.UNPROCESSABLE_ENTITY.value())
+                .error(HttpStatus.UNPROCESSABLE_ENTITY.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+    }
+
+    @ExceptionHandler(EmbeddingException.class)
+    public ResponseEntity<ErrorResponse> handleEmbeddingException(
+            EmbeddingException ex,
+            HttpServletRequest request) {
+
+        HttpStatus status = ex.getHttpStatus() != null ? ex.getHttpStatus() : HttpStatus.BAD_GATEWAY;
+        log.error("Embedding generation failed for {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(status).body(response);
+    }
+
+    @ExceptionHandler(VectorStoreException.class)
+    public ResponseEntity<ErrorResponse> handleVectorStoreException(
+            VectorStoreException ex,
+            HttpServletRequest request) {
+
+        HttpStatus status = ex.getHttpStatus() != null ? ex.getHttpStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+        log.error("Vector store failure for {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(ex.getMessage() != null && !ex.getMessage().isBlank() ? ex.getMessage() : "Failed to store document chunks")
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(status).body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(
             Exception ex,

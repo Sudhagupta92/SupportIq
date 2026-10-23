@@ -6,3 +6,7 @@ AI-Powered Customer Support Agent for E-Commerce.
   - Documentation: See [supportiq-backend/README.md](supportiq-backend/README.md) and [supportiq-backend/docs/MODULE1_EXPLANATION.md](supportiq-backend/docs/MODULE1_EXPLANATION.md).
 - **Module 2**: React Frontend Foundation and Authentication is located in [supportiq-frontend/](supportiq-frontend/).
   - Documentation: See [supportiq-frontend/README.md](supportiq-frontend/README.md) and [supportiq-frontend/docs/MODULE2_EXPLANATION.md](supportiq-frontend/docs/MODULE2_EXPLANATION.md).
+- **Module 3**: Policy Document Upload, Chunking, Embeddings, and pgvector Vector Storage.
+  - Backend implementation: [supportiq-backend/](supportiq-backend/)
+  - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
+  - Documentation: See [docs/MODULE3_EXPLANATION.md](docs/MODULE3_EXPLANATION.md) and sample document in [docs/sample-return-policy.txt](docs/sample-return-policy.txt).
