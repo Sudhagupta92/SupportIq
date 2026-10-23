@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.supportiq.controller.DocumentAdminControllerTest
--------------------------------------------------------------------------------
-Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 7.278 s -- in com.supportiq.controller.DocumentAdminControllerTest

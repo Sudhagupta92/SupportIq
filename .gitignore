@@ -1,0 +1,26 @@
+# Root Git Ignore for SupportIQ
+
+# Maven Build Artifacts
+**/target/
+*.class
+
+# Node & Frontend Build Artifacts
+**/node_modules/
+**/dist/
+**/dist-ssr/
+*.local
+
+# Environment & Key Files
+.env
+*.env
+!.env.example
+
+# IDE & OS Files
+.idea/
+.vscode/
+*.swp
+*.DS_Store
+Thumbs.db
+
+# Log files
+*.log

@@ -1,9 +1,10 @@
-# SupportIQ Backend - Module 1, 2 & 3: RAG Knowledge Base & Authentication
+# SupportIQ Backend - Module 1, 2, 3 & 4: RAG Knowledge Base, Authentication & Chat
 
 SupportIQ is an AI-powered customer support agent platform for e-commerce stores. 
 - **Module 1**: Core backend architecture, PostgreSQL persistence, Spring Security 6, and stateless JWT authentication.
 - **Module 2**: React + Vite frontend with role-based routing and customer/admin dashboards.
 - **Module 3**: Policy document ingestion, Apache PDFBox 3.x text extraction, boundary-aware chunking, Google Gemini embeddings (`gemini-embedding-001`), and PostgreSQL pgvector vector storage.
+- **Module 4**: Single-turn RAG chat assistant, similarity thresholding (`min-score: 0.58`), Google Gemini chat generation (`gemini-3.8-flash`), source citations, prompt-injection defense, and sliding-window rate limiting.
 
 ---
 
@@ -15,6 +16,7 @@ SupportIQ is an AI-powered customer support agent platform for e-commerce stores
 - **Text Extraction**: Apache PDFBox 3.0.4 (`org.apache.pdfbox:pdfbox`)
 - **Database**: PostgreSQL 16 with `pgvector/pgvector:pg16`
 - **Embedding Provider**: Google Gemini (`gemini-embedding-001` with `outputDimensionality: 768`) behind Spring AI's `EmbeddingModel` interface
+- **Chat Generation Provider**: Google Gemini (`gemini-3.8-flash`, fallback `gemini-3.1-flash-lite`) with minimal thinking (`thinkingConfig: { thinkingLevel: 'low' }`)
 - **Security & Tokens**: Spring Security 6 + JJWT 0.12.x (`jjwt-api`, `jjwt-impl`, `jjwt-jackson`)
 - **Build Tool**: Apache Maven
 
@@ -34,7 +36,7 @@ Google sunset `text-embedding-004` on 14 January 2026. SupportIQ uses the curren
 ### Task Types
 Downstream vector placement is optimized by sending explicit task types in the Gemini request:
 * **`RETRIEVAL_DOCUMENT`**: Applied when chunking and indexing policy document chunks into pgvector.
-* **`RETRIEVAL_QUERY`**: Applied when embedding search and retrieval queries (e.g. from the admin search testbed).
+* **`RETRIEVAL_QUERY`**: Applied when embedding search and retrieval queries (e.g. from the admin search testbed and customer RAG chat).
 
 ---
 
@@ -44,7 +46,14 @@ SupportIQ uses strict environment-variable-first configuration. **Never commit A
 
 | Environment Variable | Description | Default Value | Notes |
 | :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google Gemini API Key | *(None - Required for live embeddings)* | Obtain from Google AI Studio. Sent via `x-goog-api-key` header only. |
+| `GEMINI_API_KEY` | Google Gemini API Key | *(None - Required for live embeddings/chat)* | Obtain from Google AI Studio. Sent via `x-goog-api-key` header only. |
+| `GEMINI_CHAT_MODEL` | Gemini chat generation model | `gemini-3.8-flash` | Fallback: `gemini-3.1-flash-lite`. Do not use `2.0` or `-latest`. |
+| `APP_RAG_MIN_SCORE` | Similarity score threshold | `0.58` | Drops chunks below 0.58. Skips LLM if no chunks pass. |
+| `APP_RAG_CHAT_TOP_K`| Number of vector chunks retrieved | `4` | Passed to similarity search |
+| `CHAT_RATE_LIMIT_PER_MINUTE` | Per-user rate limit | `20` | In-memory sliding-window protection |
+| `CHAT_TIMEOUT_SECONDS` | Chat API request timeout | `30` | Connect and read timeout |
+| `CHAT_MAX_OUTPUT_TOKENS` | Maximum answer token count | `1000` | Response token cap |
+| `CHAT_TEMPERATURE` | Model generation temperature | `0.2` | Low temperature for grounded facts |
 | `GEMINI_EMBEDDING_MODEL`| Gemini embedding model name | `gemini-embedding-001` | Active model; overrides `text-embedding-004` |
 | `VECTOR_DIMENSION` | Dimension of embedding vectors | `768` | **MUST match pgvector column and outputDimensionality** |
 | `CHUNK_SIZE` | Target chunk character count | `800` | Natural boundary splitting |
@@ -65,7 +74,7 @@ SupportIQ uses strict environment-variable-first configuration. **Never commit A
 Open a PowerShell terminal in `supportiq-backend` and execute:
 
 ```powershell
-# 1. Set Google Gemini API Key (Required for live vector ingestion)
+# 1. Set Google Gemini API Key (Required for live vector ingestion and RAG chat)
 $env:GEMINI_API_KEY="AIzaSyYourGeminiApiKeyHere"
 
 # 2. Embedding Model (defaults to gemini-embedding-001)
@@ -78,8 +87,17 @@ $env:VECTOR_DIMENSION="768"
 $env:CHUNK_SIZE="800"
 $env:CHUNK_OVERLAP="100"
 
-# Verify the environment variable is set
-Get-ChildItem env:GEMINI_API_KEY
+# 5. Gemini Chat Model (defaults to gemini-3.8-flash, fallback gemini-3.1-flash-lite)
+$env:GEMINI_CHAT_MODEL="gemini-3.8-flash"
+
+# 6. Similarity Score Threshold (defaults to 0.58, drops chunks below threshold)
+$env:APP_RAG_MIN_SCORE="0.58"
+
+# 7. Chat Sliding-Window Rate Limit per Minute (defaults to 20 requests/minute)
+$env:CHAT_RATE_LIMIT_PER_MINUTE="20"
+
+# Verify the environment variables are set
+Get-ChildItem env:GEMINI_*
 ```
 
 ---
@@ -263,28 +281,90 @@ Response: `204 No Content` (or `404 Not Found` if id does not exist).
 
 ---
 
+### 5. Customer Policy RAG Chat (`POST /api/chat`)
+- **Access**: Any authenticated user (`CUSTOMER` or `ADMIN` role)
+- **Request Body**:
+  ```json
+  {
+    "message": "What is the return window for clothing items?"
+  }
+  ```
+- **Validation**: `message` must not be blank and cannot exceed 1000 characters.
+
+#### PowerShell Example:
+```powershell
+$headers = @{
+    "Authorization" = "Bearer $token"
+    "Content-Type"  = "application/json"
+}
+
+$body = @{
+    message = "What is the return window for damaged items?"
+} | ConvertTo-Json
+
+$response = Invoke-RestMethod -Uri "http://localhost:8080/api/chat" -Method Post -Headers $headers -Body $body
+$response | ConvertTo-Json -Depth 5
+```
+
+#### cURL Example:
+```bash
+curl -X POST http://localhost:8080/api/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is the return window for damaged items?"}'
+```
+
+#### Response Example (Answered with Sources):
+```json
+{
+  "answer": "You can return damaged items within 30 days of delivery for a full refund or replacement.",
+  "answered": true,
+  "sources": [
+    {
+      "filename": "Return_Policy.pdf",
+      "pageNumber": 1,
+      "score": 0.8145
+    }
+  ]
+}
+```
+
+#### Response Example (Below Threshold - Zero LLM Call):
+```json
+{
+  "answer": "I am sorry, but this information is not available in our store policies. Please contact our human support team for further assistance.",
+  "answered": false,
+  "sources": []
+}
+```
+
+---
+
 ## 🛡️ Error Handling & Status Codes
 
 All errors return the global standard JSON error response:
 ```json
 {
-  "timestamp": "2026-10-22T08:35:10",
-  "status": 502,
-  "error": "Bad Gateway",
-  "message": "Embedding model not available. Check GEMINI_EMBEDDING_MODEL and the API key",
-  "path": "/api/admin/documents"
+  "timestamp": "2026-10-23T08:35:10",
+  "status": 429,
+  "error": "Too Many Requests",
+  "message": "The assistant is busy, please try again in a minute",
+  "path": "/api/chat"
 }
 ```
 
 | HTTP Status | Condition | Example Trigger / Message |
 | :--- | :--- | :--- |
-| `400 Bad Request` | Invalid file or params | Uploading a `.txt` file disguised as `.pdf` (invalid magic bytes) |
-| `401 Unauthorized` | Missing / invalid JWT or API key | Calling endpoint without token, or missing/invalid `GEMINI_API_KEY` |
-| `403 Forbidden` | Insufficient role | Accessing `/api/admin/**` with a `CUSTOMER` role JWT |
-| `404 Not Found` | Document not found | `DELETE /api/admin/documents/999999` |
+| `400 Bad Request` | Invalid payload or validation error | Blank message or message exceeding 1000 characters |
+| `401 Unauthorized` | Missing / invalid JWT token | Calling `/api/chat` or `/api/admin/**` without Bearer token |
+| `403 Forbidden` | Insufficient role permissions | Accessing `/api/admin/**` with a `CUSTOMER` role JWT |
+| `404 Not Found` | Resource not found | `DELETE /api/admin/documents/999999` |
 | `413 Payload Too Large` | Exceeds 10 MB | Uploading a PDF larger than 10,485,760 bytes |
 | `422 Unprocessable` | No extractable text | Uploading a scanned image-only PDF |
-| `502 Bad Gateway` | Model unavailable / 404 / 403 | `"Embedding model not available. Check GEMINI_EMBEDDING_MODEL and the API key"` |
+| `429 Too Many Requests` | Rate limit or upstream busy | User exceeds 20 req/min or Gemini returns 429 ("The assistant is busy, please try again in a minute") |
+| `502 Bad Gateway` | Model unavailable / 404 / 403 | `"Chat model not available. Check GEMINI_CHAT_MODEL and the API key"` |
+| `504 Gateway Timeout` | Chat model request timeout | `"The assistant took too long to respond. Please try again."` |
+
 
 ---
 
@@ -302,3 +382,9 @@ mvn test
 - **`ChunkingServiceTest`**: Tests 800-char chunking with 100-char overlap, boundary splitting at paragraph/sentence markers, empty text skipping, and page number tracking.
 - **`PdfTextExtractorTest`**: Tests Apache PDFBox 3.x text extraction, `%PDF` magic byte enforcement, non-PDF rejection, scanned image (blank text) detection, and file size limits.
 - **`DocumentAdminControllerTest`**: Tests RBAC (403 for CUSTOMER), invalid format (400), scanned PDF (422), oversized file (413), upload (201), list (200), search (200), and delete (204 / 404).
+- **`ChatServiceTest`**: Tests answer generation with deduplicated source citations, zero-LLM path for chunks below `min-score (0.58)`, empty retrieval fallback, prompt injection defense, and sliding window rate limiting.
+- **`GeminiChatClientTest`**: Tests candidate thought filtering, HTTP 429 to `ChatAssistantBusyException` mapping, 404 fallback mechanism, 403 mapping, and timeout handling.
+- **`ChatControllerTest`**: Tests 401 unauthenticated rejection, 200 responses for CUSTOMER and ADMIN roles, validation constraints (blank message, >1000 chars), and 429/502/504 error response mappings.
+- **`GeminiChatClientLiveIntegrationTest`**: Optional live integration test against real Google Gemini Chat API (`gemini-3.8-flash`). Automatically skipped when `GEMINI_API_KEY` is not set.
+- **`PgVectorStoreRealIntegrationTest`**: Live integration test verifying real `PgVectorStore` UUID chunk storage, cosine similarity search, and orphan-free deletion against PostgreSQL Docker container.
+

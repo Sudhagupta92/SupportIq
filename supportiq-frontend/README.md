@@ -1,9 +1,10 @@
-# SupportIQ Frontend — Module 2 Base
+# SupportIQ Frontend — Module 2, 3 & 4
 
-SupportIQ is an AI-powered customer support application for modern e-commerce stores. **Module 2** provides the complete frontend architecture: authentication pages, session lifecycle management, Axios interceptors, responsive layout, and role-based routing.
+SupportIQ is an AI-powered customer support application for modern e-commerce stores. 
+- **Module 2**: Complete frontend architecture: authentication pages, session lifecycle management, Axios interceptors, responsive layout, and role-based routing.
+- **Module 3**: Admin Knowledge Base dashboard for policy document upload, PDF preview, chunk inspection, and semantic search testing.
+- **Module 4**: Interactive customer support RAG chat (`/chat`) with policy source citations, fallback styling for unanswered questions, clear chat, live 1000-char counter, and error banner alerts.
 
-> [!NOTE]
-> This module sets up the frontend foundation and authentication. Chat, orders, tickets, and AI agent capabilities will be introduced in subsequent modules (Module 3 & Module 4).
 
 ---
 
@@ -76,8 +77,8 @@ supportiq-frontend/
     ├── pages/
     │   ├── LoginPage.jsx       <- Login view with email/password and role redirection
     │   ├── RegisterPage.jsx    <- Registration view with client validation & 409 handling
-    │   ├── ChatPage.jsx        <- Customer/Admin landing placeholder ("Chat coming in Module 4")
-    │   ├── AdminDashboardPage.jsx <- Admin-only placeholder with live /api/admin/ping test
+    │   ├── ChatPage.jsx        <- Customer/Admin RAG chat assistant with citations, clear chat, and score thresholds
+    │   ├── AdminDashboardPage.jsx <- Admin policy document management and vector search dashboard
     │   ├── ForbiddenPage.jsx   <- 403 Access Denied view
     │   └── NotFoundPage.jsx    <- 404 Catch-all view
     ├── App.jsx                 <- Application route definitions

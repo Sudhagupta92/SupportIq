@@ -10,3 +10,7 @@ AI-Powered Customer Support Agent for E-Commerce.
   - Backend implementation: [supportiq-backend/](supportiq-backend/)
   - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
   - Documentation: See [docs/MODULE3_EXPLANATION.md](docs/MODULE3_EXPLANATION.md) and sample document in [docs/sample-return-policy.txt](docs/sample-return-policy.txt).
+- **Module 4**: Single-Turn RAG Chat Assistant, Similarity Thresholding, Prompt Protection, and React Chat Interface.
+  - Backend implementation: [supportiq-backend/](supportiq-backend/)
+  - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
+  - Documentation: See [docs/MODULE4_EXPLANATION.md](docs/MODULE4_EXPLANATION.md).

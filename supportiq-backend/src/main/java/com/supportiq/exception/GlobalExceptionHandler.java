@@ -210,6 +210,78 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(response);
     }
 
+    @ExceptionHandler({ChatRateLimitException.class, ChatAssistantBusyException.class})
+    public ResponseEntity<ErrorResponse> handleChatRateLimitAndBusyException(
+            RuntimeException ex,
+            HttpServletRequest request) {
+
+        log.warn("Chat request rate limited or assistant busy on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.TOO_MANY_REQUESTS.value())
+                .error(HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
+    }
+
+    @ExceptionHandler(ChatModelUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleChatModelUnavailableException(
+            ChatModelUnavailableException ex,
+            HttpServletRequest request) {
+
+        log.error("Chat model unavailable on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_GATEWAY.value())
+                .error(HttpStatus.BAD_GATEWAY.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
+    }
+
+    @ExceptionHandler(ChatTimeoutException.class)
+    public ResponseEntity<ErrorResponse> handleChatTimeoutException(
+            ChatTimeoutException ex,
+            HttpServletRequest request) {
+
+        log.error("Chat request timed out on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.GATEWAY_TIMEOUT.value())
+                .error(HttpStatus.GATEWAY_TIMEOUT.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(response);
+    }
+
+    @ExceptionHandler(ChatServiceException.class)
+    public ResponseEntity<ErrorResponse> handleChatServiceException(
+            ChatServiceException ex,
+            HttpServletRequest request) {
+
+        log.error("Chat service error on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_GATEWAY.value())
+                .error(HttpStatus.BAD_GATEWAY.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(
             Exception ex,
