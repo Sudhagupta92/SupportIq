@@ -41,6 +41,7 @@ public class ChatService {
     public static final String SYSTEM_INSTRUCTION = """
             You are the SupportIQ store support assistant.
             Answer ONLY from the CONTEXT provided below.
+            Add human-support contact details only when the answer is not in the CONTEXT or when the customer asks for contact help. Do not append contact details to a complete answer.
             If the context does not contain the answer, say so and suggest contacting human support.
             Never invent policies, prices, dates or contact details.
             Reply in the same language and style the customer used (English, Hindi or Hinglish).
@@ -135,9 +136,17 @@ public class ChatService {
 
         long latencyMs = System.currentTimeMillis() - startTime;
 
-        // 8. Logging: Log ONLY metadata (userId, message length, chunk count, top score, latency)
-        log.info("Chat request completed: userId={}, messageLength={}, chunks={}, topScore={}, latencyMs={}",
-                userId, query.length(), sources.size(), topScore, latencyMs);
+        // 8. Logging: Log ONLY metadata (userId, message length, chunk count, top score, latency, model, fallbackUsed)
+        String answeredModel = geminiChatClient.getLastAnsweredModel();
+        if (answeredModel == null || answeredModel.isBlank()) {
+            answeredModel = (geminiChatClient.getPrimaryModel() != null && !geminiChatClient.getPrimaryModel().isBlank())
+                    ? geminiChatClient.getPrimaryModel()
+                    : "gemini-3.5-flash";
+        }
+        boolean fallbackUsed = geminiChatClient.isLastFallbackUsed();
+
+        log.info("Chat request completed: userId={}, messageLength={}, chunks={}, topScore={}, latencyMs={}, model={}, fallbackUsed={}",
+                userId, query.length(), sources.size(), topScore, latencyMs, answeredModel, fallbackUsed);
 
         return ChatResponse.builder()
                 .answer(answer)

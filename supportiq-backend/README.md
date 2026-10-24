@@ -4,7 +4,7 @@ SupportIQ is an AI-powered customer support agent platform for e-commerce stores
 - **Module 1**: Core backend architecture, PostgreSQL persistence, Spring Security 6, and stateless JWT authentication.
 - **Module 2**: React + Vite frontend with role-based routing and customer/admin dashboards.
 - **Module 3**: Policy document ingestion, Apache PDFBox 3.x text extraction, boundary-aware chunking, Google Gemini embeddings (`gemini-embedding-001`), and PostgreSQL pgvector vector storage.
-- **Module 4**: Single-turn RAG chat assistant, similarity thresholding (`min-score: 0.58`), Google Gemini chat generation (`gemini-3.8-flash`), source citations, prompt-injection defense, and sliding-window rate limiting.
+- **Module 4**: Single-turn RAG chat assistant, similarity thresholding (`min-score: 0.58`), Google Gemini chat generation (`gemini-3.5-flash`, fallback `gemini-3.1-flash-lite`), source citations, prompt-injection defense, and sliding-window rate limiting.
 
 ---
 
@@ -16,7 +16,7 @@ SupportIQ is an AI-powered customer support agent platform for e-commerce stores
 - **Text Extraction**: Apache PDFBox 3.0.4 (`org.apache.pdfbox:pdfbox`)
 - **Database**: PostgreSQL 16 with `pgvector/pgvector:pg16`
 - **Embedding Provider**: Google Gemini (`gemini-embedding-001` with `outputDimensionality: 768`) behind Spring AI's `EmbeddingModel` interface
-- **Chat Generation Provider**: Google Gemini (`gemini-3.8-flash`, fallback `gemini-3.1-flash-lite`) with minimal thinking (`thinkingConfig: { thinkingLevel: 'low' }`)
+- **Chat Generation Provider**: Google Gemini (`gemini-3.5-flash`, fallback `gemini-3.1-flash-lite`) with minimal thinking (`thinkingConfig: { thinkingLevel: 'low' }`)
 - **Security & Tokens**: Spring Security 6 + JJWT 0.12.x (`jjwt-api`, `jjwt-impl`, `jjwt-jackson`)
 - **Build Tool**: Apache Maven
 
@@ -47,11 +47,12 @@ SupportIQ uses strict environment-variable-first configuration. **Never commit A
 | Environment Variable | Description | Default Value | Notes |
 | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Google Gemini API Key | *(None - Required for live embeddings/chat)* | Obtain from Google AI Studio. Sent via `x-goog-api-key` header only. |
-| `GEMINI_CHAT_MODEL` | Gemini chat generation model | `gemini-3.8-flash` | Fallback: `gemini-3.1-flash-lite`. Do not use `2.0` or `-latest`. |
+| `GEMINI_CHAT_MODEL` | Gemini chat generation model | `gemini-3.5-flash` | Fallback: `gemini-3.1-flash-lite`. Configurable via `GEMINI_CHAT_MODEL` |
+| `GEMINI_CHAT_FALLBACK_MODEL` | Gemini fallback chat model | `gemini-3.1-flash-lite` | Secondary model for fallback on timeout/error |
 | `APP_RAG_MIN_SCORE` | Similarity score threshold | `0.58` | Drops chunks below 0.58. Skips LLM if no chunks pass. |
 | `APP_RAG_CHAT_TOP_K`| Number of vector chunks retrieved | `4` | Passed to similarity search |
 | `CHAT_RATE_LIMIT_PER_MINUTE` | Per-user rate limit | `20` | In-memory sliding-window protection |
-| `CHAT_TIMEOUT_SECONDS` | Chat API request timeout | `30` | Connect and read timeout |
+| `CHAT_TIMEOUT_SECONDS` | Per-attempt read timeout | `12` | 12s per attempt (total chat request wait ~30s; frontend timeout 45s) |
 | `CHAT_MAX_OUTPUT_TOKENS` | Maximum answer token count | `1000` | Response token cap |
 | `CHAT_TEMPERATURE` | Model generation temperature | `0.2` | Low temperature for grounded facts |
 | `GEMINI_EMBEDDING_MODEL`| Gemini embedding model name | `gemini-embedding-001` | Active model; overrides `text-embedding-004` |
@@ -87,8 +88,9 @@ $env:VECTOR_DIMENSION="768"
 $env:CHUNK_SIZE="800"
 $env:CHUNK_OVERLAP="100"
 
-# 5. Gemini Chat Model (defaults to gemini-3.8-flash, fallback gemini-3.1-flash-lite)
-$env:GEMINI_CHAT_MODEL="gemini-3.8-flash"
+# 5. Gemini Chat Model (defaults to gemini-3.5-flash, fallback gemini-3.1-flash-lite)
+$env:GEMINI_CHAT_MODEL="gemini-3.5-flash"
+$env:GEMINI_CHAT_FALLBACK_MODEL="gemini-3.1-flash-lite"
 
 # 6. Similarity Score Threshold (defaults to 0.58, drops chunks below threshold)
 $env:APP_RAG_MIN_SCORE="0.58"
@@ -385,6 +387,6 @@ mvn test
 - **`ChatServiceTest`**: Tests answer generation with deduplicated source citations, zero-LLM path for chunks below `min-score (0.58)`, empty retrieval fallback, prompt injection defense, and sliding window rate limiting.
 - **`GeminiChatClientTest`**: Tests candidate thought filtering, HTTP 429 to `ChatAssistantBusyException` mapping, 404 fallback mechanism, 403 mapping, and timeout handling.
 - **`ChatControllerTest`**: Tests 401 unauthenticated rejection, 200 responses for CUSTOMER and ADMIN roles, validation constraints (blank message, >1000 chars), and 429/502/504 error response mappings.
-- **`GeminiChatClientLiveIntegrationTest`**: Optional live integration test against real Google Gemini Chat API (`gemini-3.8-flash`). Automatically skipped when `GEMINI_API_KEY` is not set.
+- **`GeminiChatClientLiveIntegrationTest`**: Optional live integration test against real Google Gemini Chat API (`gemini-3.5-flash`). Automatically skipped when `GEMINI_API_KEY` is not set.
 - **`PgVectorStoreRealIntegrationTest`**: Live integration test verifying real `PgVectorStore` UUID chunk storage, cosine similarity search, and orphan-free deletion against PostgreSQL Docker container.
 

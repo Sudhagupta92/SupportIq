@@ -14,7 +14,7 @@ In **Module 4**, we bring the platform to life with the **RAG Customer Chat Assi
 3. [The Zero-LLM Fallback Path (Saving Money & Hallucinations)](#3-the-zero-llm-fallback-path-saving-money--hallucinations)
 4. [Prompt Engineering: System Instructions & Delimited Context](#4-prompt-engineering-system-instructions--delimited-context)
 5. [What is Prompt Injection and How Does SupportIQ Defend Against It?](#5-what-is-prompt-injection-and-how-does-supportiq-defend-against-it)
-6. [Why Did We Choose `gemini-3.8-flash`? (Model Selection & Thinking Levels)](#6-why-did-we-choose-gemini-38-flash-model-selection--thinking-levels)
+6. [Why Did We Choose `gemini-3.5-flash`? (Model Selection & Fallback)](#6-why-did-we-choose-gemini-35-flash-model-selection--fallback)
 7. [Source Citations: Proving Authenticity to the Customer](#7-source-citations-proving-authenticity-to-the-customer)
 8. [Abuse Protection: In-Memory Sliding-Window Rate Limiter](#8-abuse-protection-in-memory-sliding-window-rate-limiter)
 9. [Confidentiality & Error Mapping: Never Leaking Secrets](#9-confidentiality--error-mapping-never-leaking-secrets)
@@ -32,7 +32,7 @@ The agent cannot guess or invent an answer. Instead, the agent opens the store h
 **RAG (Retrieval-Augmented Generation)** does exactly this for AI:
 1. **Retrieval**: When the customer asks a question, SupportIQ searches our PostgreSQL `pgvector` database to find the most relevant policy document chunks.
 2. **Augmentation**: We package those exact policy chunks into a delimited context block alongside a strict system prompt.
-3. **Generation**: We send this combined package to Google Gemini (`gemini-3.8-flash`) to generate a concise, polite answer citing the source documents.
+3. **Generation**: We send this combined package to Google Gemini (`gemini-3.5-flash`, fallback `gemini-3.1-flash-lite`) to generate a concise, polite answer citing the source documents.
 
 Because each request in Module 4 is a single question with no stored history, the model focuses solely on answering the current inquiry accurately.
 
@@ -106,6 +106,7 @@ In Google Gemini's REST API, system instructions are separated from user inputs:
 ```text
 You are the SupportIQ store support assistant.
 Answer ONLY from the CONTEXT provided below.
+Add human-support contact details only when the answer is not in the CONTEXT or when the customer asks for contact help. Do not append contact details to a complete answer.
 If the context does not contain the answer, say so and suggest contacting human support.
 Never invent policies, prices, dates or contact details.
 Reply in the same language and style the customer used (English, Hindi or Hinglish).
@@ -148,12 +149,13 @@ Our automated tests (`ChatServiceTest.testProcessChat_PromptInjectionDefense`) v
 
 ---
 
-## 6. Why Did We Choose `gemini-3.8-flash`? (Model Selection & Thinking Levels)
+## 6. Why Did We Choose `gemini-3.5-flash`? (Model Selection & Fallback)
 
 SupportIQ requires fast, cost-effective, high-accuracy Q&A over policy chunks.
 
-- **Primary Model**: `gemini-3.8-flash` (configurable via `GEMINI_CHAT_MODEL`).
-- **Fallback Model**: `gemini-3.1-flash-lite`.
+- **Primary Model**: `gemini-3.5-flash` (configurable via `GEMINI_CHAT_MODEL`). Provides reliable, consistent performance (~4s latency) for responsive chat.
+- **Fallback Model**: `gemini-3.1-flash-lite` (configurable via `GEMINI_CHAT_FALLBACK_MODEL`). Automatically engaged on timeout (12s per attempt), connection closed/reset, or HTTP 404, 429, and 503.
+- **Worst-Case Backend Bound**: With a 12s per-attempt read timeout, worst-case backend execution for two attempts plus vector retrieval is ~30 seconds, staying comfortably within the frontend's 45s request timeout.
 - **Excluded Models**: Older `gemini-2.0-flash`, `gemini-2.5-flash`, and unversioned `-latest` aliases are avoided to ensure reproducible, production-stable behavior.
 
 ### Minimal Thinking (`thinkingConfig: { thinkingLevel: 'low' }`)
@@ -214,15 +216,16 @@ To protect our API and upstream Gemini quota, SupportIQ enforces an in-memory sl
 
 SupportIQ adheres to strict security rules:
 1. **API Key in Header Only**: Transmitted exclusively via `x-goog-api-key`. Never in URL query strings or logs.
-2. **Sanitized Logs**: The chat service logs only metadata:
+2. **Sanitized Logs**: The chat service logs only non-sensitive metadata:
    ```text
-   INFO ... Chat request completed: userId=1, messageLength=42, chunks=2, topScore=0.78, latencyMs=842
+   INFO ... Chat request completed: userId=1, messageLength=42, chunks=2, topScore=0.78, latencyMs=842, model=gemini-3.5-flash, fallbackUsed=false
    ```
    **Never logged**: Full customer question, chunk text, LLM answer text, or API keys.
 3. **Upstream Error Mapping**:
    | Upstream Scenario | SupportIQ HTTP Status | Client Error Message |
    | :--- | :--- | :--- |
    | Gemini 429 (Rate limited/quota) | `429 Too Many Requests` | `"The assistant is busy, please try again in a minute"` |
+   | Gemini 503 (Overloaded/unavailable) | `503 Service Unavailable` | `"The assistant is busy, please try again in a minute"` |
    | Gemini 404 / 403 (Model unavailable) | `502 Bad Gateway` | `"Chat model not available. Check GEMINI_CHAT_MODEL and the API key"` |
    | Read/Connect Timeout | `504 Gateway Timeout` | `"The assistant took too long to respond. Please try again."` |
    | General upstream failure | `502 Bad Gateway` | `"An error occurred while communicating with the chat model. Please try again."` |
@@ -260,10 +263,10 @@ sequenceDiagram
         Service-->>Customer: answered=false, fallback message, sources=[] (Zero LLM call!)
     else Chunks pass threshold
         Service->>Service: Format delimited CONTEXT block
-        Service->>Gemini: POST /models/gemini-3.8-flash:generateContent
+        Service->>Gemini: POST /models/gemini-3.5-flash:generateContent
         Gemini-->>Service: Generated answer (thinking parts filtered)
         Service->>Service: Deduplicate (filename, page) sources
-        Service->>Service: Log metadata (userId, messageLen, chunks, score, latency)
+        Service->>Service: Log metadata (userId, messageLen, chunks, score, latency, model, fallbackUsed)
         Service-->>Customer: HTTP 200 { answer, answered: true, sources }
     end
 ```

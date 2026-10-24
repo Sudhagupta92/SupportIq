@@ -52,10 +52,13 @@ const ChatPage = () => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showSlowHint, setShowSlowHint] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const isSendingRef = useRef(false);
+  const slowHintTimerRef = useRef(null);
 
   // Auto-scroll to the newest message whenever messages or loading state changes
   useEffect(() => {
@@ -67,15 +70,27 @@ const ChatPage = () => {
     textareaRef.current?.focus();
   }, []);
 
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (slowHintTimerRef.current) {
+        clearTimeout(slowHintTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSendMessage = async (textToSend) => {
+    if (isSendingRef.current || isLoading) return;
+
     const query = (textToSend || inputMessage).trim();
-    if (!query || isLoading) return;
+    if (!query) return;
 
     if (query.length > 1000) {
       setErrorMessage('Your message exceeds the 1000-character limit. Please shorten your question.');
       return;
     }
 
+    isSendingRef.current = true;
     setErrorMessage(null);
 
     // Append user message immediately
@@ -89,6 +104,15 @@ const ChatPage = () => {
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
+    setShowSlowHint(false);
+
+    // Start 8-second timer for slow response hint
+    if (slowHintTimerRef.current) {
+      clearTimeout(slowHintTimerRef.current);
+    }
+    slowHintTimerRef.current = setTimeout(() => {
+      setShowSlowHint(true);
+    }, 8000);
 
     try {
       const response = await sendChatMessageApi(query);
@@ -105,16 +129,27 @@ const ChatPage = () => {
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
       console.error('Chat request failed:', err);
+      const isTimeout =
+        err.code === 'ECONNABORTED' ||
+        err.message?.toLowerCase().includes('timeout') ||
+        err.response?.status === 504;
+
       // Extract backend error message if present (429, 502, 504, 400)
       const backendMessage =
-        err.response?.data?.message ||
-        (err.code === 'ECONNABORTED'
+        (isTimeout
           ? 'The assistant took too long to respond. Please try again.'
-          : 'Unable to reach the SupportIQ assistant. Please check your network connection.');
+          : err.response?.data?.message) ||
+        'Unable to reach the SupportIQ assistant. Please check your network connection.';
 
       setErrorMessage(backendMessage);
     } finally {
+      if (slowHintTimerRef.current) {
+        clearTimeout(slowHintTimerRef.current);
+        slowHintTimerRef.current = null;
+      }
+      setShowSlowHint(false);
       setIsLoading(false);
+      isSendingRef.current = false;
       // Re-focus the input textarea
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
@@ -123,7 +158,9 @@ const ChatPage = () => {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      if (!isLoading && !isSendingRef.current) {
+        handleSendMessage();
+      }
     }
   };
 
@@ -135,7 +172,9 @@ const ChatPage = () => {
   };
 
   const handleSelectExample = (question) => {
-    handleSendMessage(question);
+    if (!isLoading && !isSendingRef.current) {
+      handleSendMessage(question);
+    }
   };
 
   return (
@@ -201,12 +240,13 @@ const ChatPage = () => {
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-3">
                     Suggested Questions
                   </span>
-                  {EXAMPLE_QUESTIONS.map((question, index) => (
+                    {EXAMPLE_QUESTIONS.map((question, index) => (
                     <button
                       key={index}
                       type="button"
+                      disabled={isLoading}
                       onClick={() => handleSelectExample(question)}
-                      className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-white hover:bg-indigo-50/40 text-slate-700 hover:text-indigo-900 text-sm font-medium transition-all shadow-sm flex items-center justify-between group cursor-pointer"
+                      className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-white hover:bg-indigo-50/40 text-slate-700 hover:text-indigo-900 text-sm font-medium transition-all shadow-sm flex items-center justify-between group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <span className="flex items-center gap-2.5">
                         <HelpCircle className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 shrink-0" />
@@ -301,11 +341,18 @@ const ChatPage = () => {
                 <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
                   <Bot className="w-4 h-4" />
                 </div>
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                  <span className="text-xs text-slate-500 font-medium">
-                    Searching store policies & formulating answer...
-                  </span>
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                    <span className="text-xs text-slate-500 font-medium">
+                      Searching store policies & formulating answer...
+                    </span>
+                  </div>
+                  {showSlowHint && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-indigo-600 font-medium pl-6 animate-pulse">
+                      <span>Still working on it...</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -336,7 +383,9 @@ const ChatPage = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleSendMessage();
+                if (!isLoading && !isSendingRef.current) {
+                  handleSendMessage();
+                }
               }}
               className="relative"
             >

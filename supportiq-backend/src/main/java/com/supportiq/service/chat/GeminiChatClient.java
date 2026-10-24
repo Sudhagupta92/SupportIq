@@ -7,6 +7,7 @@ import com.supportiq.exception.ChatServiceException;
 import com.supportiq.exception.ChatTimeoutException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,9 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.io.EOFException;
+import java.net.ProtocolException;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -25,12 +29,14 @@ import java.util.concurrent.TimeoutException;
  * Client for interacting with Google Gemini GenerateContent REST API.
  * 
  * Features:
- * - Default model: gemini-3.8-flash (via GEMINI_CHAT_MODEL or app.rag.chat-model).
- * - Fallback model: gemini-3.1-flash-lite.
+ * - Default primary model: gemini-3.5-flash (via GEMINI_CHAT_MODEL or app.rag.chat-model).
+ * - Fallback model: gemini-3.1-flash-lite (via GEMINI_CHAT_FALLBACK_MODEL or app.rag.fallback-chat-model).
+ * - Per-attempt read timeout of 12 seconds; total wait under ~30 seconds.
+ * - Falls back to secondary model on timeout, connection closed/reset, HTTP 404, 429, and 503.
  * - RestClient with strict timeout configuration.
  * - Sends API key ONLY in x-goog-api-key header (never in URL or query params).
  * - Enforces temperature 0.2, max output tokens, and thinkingConfig: { thinkingLevel: 'low' }.
- * - Maps upstream HTTP error codes: 429 -> ChatAssistantBusyException, 404/403 -> ChatModelUnavailableException, timeouts -> ChatTimeoutException.
+ * - Maps upstream HTTP error codes: 429/503 -> ChatAssistantBusyException, 404/403 -> ChatModelUnavailableException, timeouts -> ChatTimeoutException.
  * - Strict confidentiality: Never leaks API key, full URL, prompts, or stack traces in logs or responses.
  */
 @Slf4j
@@ -44,17 +50,21 @@ public class GeminiChatClient {
     private final int maxOutputTokens;
     private final RestClient restClient;
 
+    private final ThreadLocal<String> lastAnsweredModel = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> lastFallbackUsed = ThreadLocal.withInitial(() -> false);
+
     @org.springframework.beans.factory.annotation.Autowired
     public GeminiChatClient(
             @Value("${app.rag.gemini.api-key:}") String apiKey,
-            @Value("${app.rag.chat-model:gemini-3.8-flash}") String primaryModel,
+            @Value("${app.rag.chat-model:gemini-3.5-flash}") String primaryModel,
             @Value("${app.rag.fallback-chat-model:gemini-3.1-flash-lite}") String fallbackModel,
             @Value("${app.rag.temperature:0.2}") double temperature,
             @Value("${app.rag.max-output-tokens:1000}") int maxOutputTokens,
-            @Value("${app.rag.chat-timeout-seconds:30}") int timeoutSeconds) {
+            @Value("${app.rag.chat-timeout-seconds:12}") int timeoutSeconds) {
 
         this(apiKey, primaryModel, fallbackModel, temperature, maxOutputTokens, createDefaultRestClient(timeoutSeconds));
     }
+
 
     public GeminiChatClient(
             String apiKey,
@@ -65,7 +75,7 @@ public class GeminiChatClient {
             RestClient restClient) {
 
         this.apiKey = (apiKey != null) ? apiKey.trim() : "";
-        this.primaryModel = (primaryModel != null && !primaryModel.isBlank()) ? primaryModel.trim() : "gemini-3.8-flash";
+        this.primaryModel = (primaryModel != null && !primaryModel.isBlank()) ? primaryModel.trim() : "gemini-3.5-flash";
         this.fallbackModel = (fallbackModel != null && !fallbackModel.isBlank()) ? fallbackModel.trim() : "gemini-3.1-flash-lite";
         this.temperature = temperature > 0 ? temperature : 0.2;
         this.maxOutputTokens = maxOutputTokens > 0 ? maxOutputTokens : 1000;
@@ -74,9 +84,10 @@ public class GeminiChatClient {
 
     private static RestClient createDefaultRestClient(int timeoutSeconds) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        int timeoutMs = Math.max(1000, timeoutSeconds * 1000);
-        requestFactory.setConnectTimeout(Duration.ofMillis(timeoutMs));
-        requestFactory.setReadTimeout(Duration.ofMillis(timeoutMs));
+        int readTimeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : 12;
+        int connectTimeoutMs = Math.min(3000, readTimeoutSeconds * 1000);
+        requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
+        requestFactory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
         return RestClient.builder()
                 .requestFactory(requestFactory)
                 .build();
@@ -84,7 +95,8 @@ public class GeminiChatClient {
 
     /**
      * Calls Gemini generateContent with the system instruction and context/user prompt.
-     * Attempts the primary model, and falls back to the fallback model if primary is not found (404).
+     * Attempts the primary model, and falls back to the fallback model on timeout, connection closed/reset,
+     * HTTP 404, 429, or 503.
      *
      * @param systemInstruction system-level rules and persona
      * @param userPrompt user question with delimited context
@@ -95,26 +107,58 @@ public class GeminiChatClient {
             throw new ChatModelUnavailableException("Chat model not available. Check GEMINI_CHAT_MODEL and the API key");
         }
 
+        lastAnsweredModel.remove();
+        lastFallbackUsed.set(false);
+
         try {
-            return callModel(primaryModel, systemInstruction, userPrompt);
-        } catch (RestClientResponseException ex) {
-            int statusCode = ex.getStatusCode().value();
-            if ((statusCode == 404 || statusCode == 503) && !primaryModel.equalsIgnoreCase(fallbackModel)) {
-                log.warn("Primary chat model '{}' returned HTTP {}. Attempting fallback model '{}'", primaryModel, statusCode, fallbackModel);
+            String answer = callModel(primaryModel, systemInstruction, userPrompt);
+            lastAnsweredModel.set(primaryModel);
+            lastFallbackUsed.set(false);
+            return answer;
+        } catch (Exception primaryEx) {
+            if (shouldFallback(primaryEx) && !primaryModel.equalsIgnoreCase(fallbackModel)) {
+                log.warn("Primary chat model '{}' failed ({}) - attempting fallback model '{}'",
+                        primaryModel, getSafeFailureDescription(primaryEx), fallbackModel);
                 try {
-                    return callModel(fallbackModel, systemInstruction, userPrompt);
-                } catch (RestClientResponseException fallbackEx) {
-                    handleRestClientResponseException(fallbackEx);
+                    String answer = callModel(fallbackModel, systemInstruction, userPrompt);
+                    lastAnsweredModel.set(fallbackModel);
+                    lastFallbackUsed.set(true);
+                    return answer;
+                } catch (RestClientResponseException fallbackRex) {
+                    handleRestClientResponseException(fallbackRex);
                 } catch (Exception fallbackEx) {
                     handleGeneralException(fallbackEx);
                 }
+            } else {
+                if (primaryEx instanceof RestClientResponseException rex) {
+                    handleRestClientResponseException(rex);
+                } else {
+                    handleGeneralException(primaryEx);
+                }
             }
-            handleRestClientResponseException(ex);
-            return null; // Unreachable
-        } catch (Exception ex) {
-            handleGeneralException(ex);
             return null; // Unreachable
         }
+    }
+
+    private boolean shouldFallback(Throwable ex) {
+        if (ex instanceof RestClientResponseException rex) {
+            int code = rex.getStatusCode().value();
+            return code == 404 || code == 429 || code == 503;
+        }
+        return isTimeout(ex) || isConnectionClosedOrReset(ex);
+    }
+
+    private String getSafeFailureDescription(Throwable ex) {
+        if (ex instanceof RestClientResponseException rex) {
+            return "HTTP " + rex.getStatusCode().value();
+        }
+        if (isTimeout(ex)) {
+            return "Read timeout";
+        }
+        if (isConnectionClosedOrReset(ex)) {
+            return "Connection closed/reset";
+        }
+        return "Communication failure";
     }
 
     private String callModel(String model, String systemInstruction, String userPrompt) {
@@ -210,7 +254,9 @@ public class GeminiChatClient {
         log.error("Gemini Chat API returned HTTP error: status={}", status);
 
         if (status == 429) {
-            throw new ChatAssistantBusyException("The assistant is busy, please try again in a minute");
+            throw new ChatAssistantBusyException("The assistant is busy, please try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+        } else if (status == 503) {
+            throw new ChatAssistantBusyException("The assistant is busy, please try again in a minute", HttpStatus.SERVICE_UNAVAILABLE);
         } else if (status == 404 || status == 403) {
             throw new ChatModelUnavailableException("Chat model not available. Check GEMINI_CHAT_MODEL and the API key");
         } else {
@@ -238,12 +284,42 @@ public class GeminiChatClient {
     private boolean isTimeout(Throwable ex) {
         Throwable current = ex;
         while (current != null) {
-            if (current instanceof SocketTimeoutException || current instanceof TimeoutException) {
+            if (current instanceof SocketTimeoutException
+                    || current instanceof TimeoutException
+                    || "java.net.http.HttpTimeoutException".equals(current.getClass().getName())) {
                 return true;
             }
-            if (current instanceof ResourceAccessException && current.getMessage() != null) {
-                String msg = current.getMessage().toLowerCase();
-                if (msg.contains("timed out") || msg.contains("timeout")) {
+            String msg = current.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("timed out") || lower.contains("timeout")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isConnectionClosedOrReset(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof SocketException
+                    || current instanceof EOFException
+                    || current instanceof ProtocolException) {
+                return true;
+            }
+            String msg = current.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("connection reset")
+                        || lower.contains("connection closed")
+                        || lower.contains("broken pipe")
+                        || lower.contains("connection refused")
+                        || lower.contains("connection abort")
+                        || lower.contains("premature eof")
+                        || lower.contains("unexpected end of stream")
+                        || lower.contains("unexpected end of file")) {
                     return true;
                 }
             }
@@ -258,5 +334,14 @@ public class GeminiChatClient {
 
     public String getFallbackModel() {
         return fallbackModel;
+    }
+
+    public String getLastAnsweredModel() {
+        return lastAnsweredModel.get();
+    }
+
+    public boolean isLastFallbackUsed() {
+        Boolean used = lastFallbackUsed.get();
+        return used != null && used;
     }
 }

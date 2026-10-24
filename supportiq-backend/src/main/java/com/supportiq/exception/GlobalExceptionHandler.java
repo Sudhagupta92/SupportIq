@@ -210,12 +210,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(response);
     }
 
-    @ExceptionHandler({ChatRateLimitException.class, ChatAssistantBusyException.class})
-    public ResponseEntity<ErrorResponse> handleChatRateLimitAndBusyException(
-            RuntimeException ex,
+    @ExceptionHandler(ChatRateLimitException.class)
+    public ResponseEntity<ErrorResponse> handleChatRateLimitException(
+            ChatRateLimitException ex,
             HttpServletRequest request) {
 
-        log.warn("Chat request rate limited or assistant busy on {}: {}", request.getRequestURI(), ex.getMessage());
+        log.warn("Chat request rate limited on {}: {}", request.getRequestURI(), ex.getMessage());
 
         ErrorResponse response = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
@@ -226,6 +226,25 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
+    }
+
+    @ExceptionHandler(ChatAssistantBusyException.class)
+    public ResponseEntity<ErrorResponse> handleChatAssistantBusyException(
+            ChatAssistantBusyException ex,
+            HttpServletRequest request) {
+
+        HttpStatus status = ex.getHttpStatus() != null ? ex.getHttpStatus() : HttpStatus.TOO_MANY_REQUESTS;
+        log.warn("Chat assistant busy on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(status).body(response);
     }
 
     @ExceptionHandler(ChatModelUnavailableException.class)

@@ -18,21 +18,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GeminiChatClientLiveIntegrationTest {
 
     @Test
-    @DisplayName("Live Integration Test: Call real Gemini chat model gemini-3.8-flash")
+    @DisplayName("Live Integration Test: Call real Gemini chat model gemini-3.5-flash")
     void testLiveGeminiChatGeneration() throws InterruptedException {
         String apiKey = System.getenv("GEMINI_API_KEY");
         if (apiKey != null) {
             apiKey = apiKey.trim();
         }
-        String chatModel = System.getenv().getOrDefault("GEMINI_CHAT_MODEL", "gemini-3.8-flash");
+        String chatModel = System.getenv().getOrDefault("GEMINI_CHAT_MODEL", "gemini-3.5-flash");
+        String fallbackModel = System.getenv().getOrDefault("GEMINI_CHAT_FALLBACK_MODEL", "gemini-3.1-flash-lite");
 
         GeminiChatClient client = new GeminiChatClient(
                 apiKey,
                 chatModel,
-                "gemini-3.1-flash-lite",
+                fallbackModel,
                 0.2,
                 500,
-                240
+                12
         );
 
         String context = """

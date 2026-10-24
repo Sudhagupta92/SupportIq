@@ -7,6 +7,6 @@ import api from './axios';
  * @returns {Promise<{ answer: string, answered: boolean, sources: Array<{ filename: string, pageNumber: number, score: number }> }>}
  */
 export const sendChatMessageApi = async (message) => {
-  const response = await api.post('/api/chat', { message });
+  const response = await api.post('/api/chat', { message }, { timeout: 45000 });
   return response.data;
 };

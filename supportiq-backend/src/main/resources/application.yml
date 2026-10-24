@@ -67,10 +67,10 @@ app:
     chat-top-k: ${APP_RAG_CHAT_TOP_K:4}
     # Chosen from manual tests (relevant questions scored about 0.65, an unrelated question about 0.50) and must be tuned later.
     min-score: ${APP_RAG_MIN_SCORE:0.58}
-    chat-model: ${GEMINI_CHAT_MODEL:gemini-3.8-flash}
-    fallback-chat-model: ${GEMINI_FALLBACK_CHAT_MODEL:gemini-3.1-flash-lite}
+    chat-model: ${GEMINI_CHAT_MODEL:gemini-3.5-flash}
+    fallback-chat-model: ${GEMINI_CHAT_FALLBACK_MODEL:${GEMINI_FALLBACK_CHAT_MODEL:gemini-3.1-flash-lite}}
     chat-rate-limit-per-minute: ${CHAT_RATE_LIMIT_PER_MINUTE:20}
-    chat-timeout-seconds: ${CHAT_TIMEOUT_SECONDS:30}
+    chat-timeout-seconds: ${CHAT_TIMEOUT_SECONDS:12}
     max-output-tokens: ${CHAT_MAX_OUTPUT_TOKENS:1000}
     temperature: ${CHAT_TEMPERATURE:0.2}
 
