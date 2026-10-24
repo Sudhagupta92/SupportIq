@@ -41,4 +41,7 @@ app:
     chat-timeout-seconds: 12
     max-output-tokens: 1000
     temperature: 0.2
+    order-intent-keywords: order,orders,track,tracking,parcel,package,delivery,delivered,shipped,status,kahan,kab aayega,ye order,mera order
+  demo-data:
+    enabled: false
 

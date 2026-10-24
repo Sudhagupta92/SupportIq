@@ -389,4 +389,43 @@ mvn test
 - **`ChatControllerTest`**: Tests 401 unauthenticated rejection, 200 responses for CUSTOMER and ADMIN roles, validation constraints (blank message, >1000 chars), and 429/502/504 error response mappings.
 - **`GeminiChatClientLiveIntegrationTest`**: Optional live integration test against real Google Gemini Chat API (`gemini-3.5-flash`). Automatically skipped when `GEMINI_API_KEY` is not set.
 - **`PgVectorStoreRealIntegrationTest`**: Live integration test verifying real `PgVectorStore` UUID chunk storage, cosine similarity search, and orphan-free deletion against PostgreSQL Docker container.
+- **`OrderToolServiceTest`**: Tests security isolation (tool schema contains no userId), owner order reading, identical `{"found": false}` for foreign/missing orders, extra argument rejection, and prompt injection safety.
+- **`OrderIntentDetectorTest`**: Tests non-LLM order intent matching across English and Hinglish ("Mera order 1001 kahan hai?", "Show my recent orders", "kab aayega") and non-order questions ("Do you sell pizza?").
+- **`ChatServiceDecisionTest`**: Tests the 4 routing paths: (a) retrieval passes + order-intent (context + tools), (b) retrieval passes + no order-intent (context only), (c) retrieval fails + order-intent (tools only), (d) retrieval fails + no order-intent (zero model calls).
+- **`GeminiChatClientToolTest`**: Tests function calling tool loop, model content and thought signature preservation, and the 3-round execution limit.
+- **`DemoDataInitializerTest`**: Tests idempotent seeding of 3 demo customers (`demo1@example.com` to `demo3@example.com`, password `Demo@12345`) and 12 orders covering all statuses.
+- **`AdminOrderControllerTest`**: Tests `GET /api/admin/orders` pagination, 403 Forbidden for CUSTOMER role, 200 for ADMIN, and zero password/token exposure.
+- **`GeminiChatClientOrderLiveIntegrationTest`**: Optional live integration test with real Gemini API verifying live tool calling on both `gemini-3.5-flash` and `gemini-3.1-flash-lite`.
+
+---
+
+## 📦 Module 5: Customer Orders & LLM Tool Calling
+
+### Demo Accounts & Passwords:
+| Email | Password | Role | Orders Seeded |
+| :--- | :--- | :--- | :--- |
+| `demo1@example.com` | `Demo@12345` | `CUSTOMER` | Orders 1001, 1002, 1003, 1004 |
+| `demo2@example.com` | `Demo@12345` | `CUSTOMER` | Orders 1005, 1006, 1007, 1008 |
+| `demo3@example.com` | `Demo@12345` | `CUSTOMER` | Orders 1009, 1010, 1011, 1012 |
+| `admin@supportiq.com` | `Admin@12345` | `ADMIN` | Full admin privileges |
+
+### New Configuration Settings:
+```yaml
+app:
+  demo-data:
+    # Default true for local development and testing. MUST be set to false for any deployment!
+    enabled: ${APP_DEMO_DATA_ENABLED:${DEMO_DATA_ENABLED:true}}
+  rag:
+    # Non-LLM order intent keywords (comma-separated or list)
+    order-intent-keywords: ${APP_ORDER_INTENT_KEYWORDS:order,orders,track,tracking,parcel,package,delivery,delivered,shipped,status,kahan,kab aayega,ye order,mera order}
+```
+
+### Read-Only Tools Exposed to Model:
+1. `get_order_status(orderNumber)`: Retrieves details for an order owned by the authenticated customer. Returns `{"found": false}` for missing or foreign orders.
+2. `list_my_recent_orders()`: Lists up to 5 most recent orders belonging to the authenticated customer.
+*Note: Tool schemas never expose `userId` or `customerId`. User ID is resolved strictly from the server-side JWT principal.*
+
+### Admin Inspection Endpoint:
+- `GET /api/admin/orders?page=0&size=10`: Returns paginated orders for ADMIN role (max page size 50). Never exposes passwords or tokens.
+
 

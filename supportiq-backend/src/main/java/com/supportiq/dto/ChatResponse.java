@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,5 +19,8 @@ public class ChatResponse {
 
     private String answer;
     private boolean answered;
-    private List<ChatSource> sources;
+    @Builder.Default
+    private List<ChatSource> sources = new ArrayList<>();
+    @Builder.Default
+    private List<String> toolsUsed = new ArrayList<>();
 }

@@ -13,6 +13,8 @@ import {
   Loader2,
   X,
   User as UserIcon,
+  Package,
+  Info,
 } from 'lucide-react';
 
 /**
@@ -21,7 +23,8 @@ import {
 const EXAMPLE_QUESTIONS = [
   'What is your return policy for damaged items?',
   'How long does standard shipping take?',
-  'Can I cancel or modify an order after placing it?',
+  'Mera order 1001 kahan hai?',
+  'Show my recent orders',
 ];
 
 const generateId = () => {
@@ -256,6 +259,19 @@ const ChatPage = () => {
                     </button>
                   ))}
                 </div>
+
+                {/* Development Mode Demo Notice */}
+                {import.meta.env.DEV && (
+                  <div className="mt-5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-100/80 text-indigo-900 text-xs text-left w-full flex items-start gap-2.5 shadow-xs">
+                    <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                    <div className="text-[12px] leading-relaxed">
+                      <span className="font-semibold text-indigo-950">Demo Accounts Available: </span>
+                      <span className="text-slate-600">
+                        Use <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-indigo-700">demo1@example.com</code> to <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-indigo-700">demo3@example.com</code> (password: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-indigo-700">Demo@12345</code>) to test order tracking.
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* Conversation Messages */
@@ -298,22 +314,37 @@ const ChatPage = () => {
                       {msg.sources && msg.sources.length > 0 && (
                         <div className="mt-3 pt-2.5 border-t border-slate-100">
                           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                            Cited Policy Sources:
+                            Cited Sources:
                           </span>
                           <div className="flex flex-wrap gap-1.5">
-                            {msg.sources.map((source, idx) => (
-                              <span
-                                key={idx}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200/80 hover:bg-slate-200/70 transition-colors"
-                                title={`Document: ${source.filename}, Page: ${source.pageNumber || 'N/A'}${source.score ? ` (Score: ${source.score})` : ''}`}
-                              >
-                                <FileText className="w-3 h-3 text-slate-500" />
-                                <span>
-                                  {source.filename}
-                                  {source.pageNumber ? `, page ${source.pageNumber}` : ''}
+                            {msg.sources.map((source, idx) => {
+                              const isOrder = source.type === 'ORDER' || (!source.filename && source.label);
+                              if (isOrder) {
+                                return (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100/80 transition-colors shadow-xs"
+                                    title={`Order Reference: ${source.label}`}
+                                  >
+                                    <Package className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                    <span>{source.label}</span>
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200/80 hover:bg-slate-200/70 transition-colors"
+                                  title={`Document: ${source.filename}, Page: ${source.pageNumber || 'N/A'}${source.score ? ` (Score: ${source.score})` : ''}`}
+                                >
+                                  <FileText className="w-3 h-3 text-slate-500" />
+                                  <span>
+                                    {source.filename}
+                                    {source.pageNumber ? `, page ${source.pageNumber}` : ''}
+                                  </span>
                                 </span>
-                              </span>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}

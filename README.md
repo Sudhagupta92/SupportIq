@@ -14,3 +14,8 @@ AI-Powered Customer Support Agent for E-Commerce.
   - Backend implementation: [supportiq-backend/](supportiq-backend/)
   - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
   - Documentation: See [docs/MODULE4_EXPLANATION.md](docs/MODULE4_EXPLANATION.md).
+- **Module 5**: Orders and LLM Tool Calling (Function Calling, Security Isolation, 4 Decision Paths, Demo Data Seeder).
+  - Backend implementation: [supportiq-backend/](supportiq-backend/)
+  - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
+  - Documentation: See [docs/MODULE5_EXPLANATION.md](docs/MODULE5_EXPLANATION.md).
+

@@ -11,7 +11,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -20,6 +19,7 @@ import java.net.ProtocolException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,11 +33,13 @@ import java.util.concurrent.TimeoutException;
  * - Fallback model: gemini-3.1-flash-lite (via GEMINI_CHAT_FALLBACK_MODEL or app.rag.fallback-chat-model).
  * - Per-attempt read timeout of 12 seconds; total wait under ~30 seconds.
  * - Falls back to secondary model on timeout, connection closed/reset, HTTP 404, 429, and 503.
+ * - Full function-calling tool loop with up to 3 rounds.
+ * - Preserves model content parts and thought signatures for Gemini 3.x and 3.5 models.
  * - RestClient with strict timeout configuration.
  * - Sends API key ONLY in x-goog-api-key header (never in URL or query params).
  * - Enforces temperature 0.2, max output tokens, and thinkingConfig: { thinkingLevel: 'low' }.
  * - Maps upstream HTTP error codes: 429/503 -> ChatAssistantBusyException, 404/403 -> ChatModelUnavailableException, timeouts -> ChatTimeoutException.
- * - Strict confidentiality: Never leaks API key, full URL, prompts, or stack traces in logs or responses.
+ * - Strict confidentiality: Never leaks API key, full URL, prompts, or sensitive arguments in logs or responses.
  */
 @Slf4j
 @Component
@@ -64,7 +66,6 @@ public class GeminiChatClient {
 
         this(apiKey, primaryModel, fallbackModel, temperature, maxOutputTokens, createDefaultRestClient(timeoutSeconds));
     }
-
 
     public GeminiChatClient(
             String apiKey,
@@ -94,15 +95,34 @@ public class GeminiChatClient {
     }
 
     /**
-     * Calls Gemini generateContent with the system instruction and context/user prompt.
-     * Attempts the primary model, and falls back to the fallback model on timeout, connection closed/reset,
-     * HTTP 404, 429, or 503.
+     * Calls Gemini generateContent with the system instruction and context/user prompt (text-only).
      *
      * @param systemInstruction system-level rules and persona
      * @param userPrompt user question with delimited context
      * @return generated answer text
      */
     public String generateContent(String systemInstruction, String userPrompt) {
+        GeminiChatResult result = generateContentWithTools(systemInstruction, userPrompt, null, null);
+        return result != null ? result.getAnswer() : null;
+    }
+
+    /**
+     * Executes the Gemini generateContent call with tool declarations and function calling loop.
+     * Attempts the primary model, and falls back to the fallback model on timeout, connection closed/reset,
+     * HTTP 404, 429, or 503.
+     *
+     * @param systemInstruction system-level rules and persona
+     * @param userPrompt user prompt or question
+     * @param tools tool declarations schema (or null)
+     * @param toolExecutor callback for executing tool calls (or null)
+     * @return chat result including final answer and tools used
+     */
+    public GeminiChatResult generateContentWithTools(
+            String systemInstruction,
+            String userPrompt,
+            List<Map<String, Object>> tools,
+            ToolExecutor toolExecutor) {
+
         if (apiKey.isBlank()) {
             throw new ChatModelUnavailableException("Chat model not available. Check GEMINI_CHAT_MODEL and the API key");
         }
@@ -111,19 +131,19 @@ public class GeminiChatClient {
         lastFallbackUsed.set(false);
 
         try {
-            String answer = callModel(primaryModel, systemInstruction, userPrompt);
+            GeminiChatResult result = runToolLoop(primaryModel, systemInstruction, userPrompt, tools, toolExecutor);
             lastAnsweredModel.set(primaryModel);
             lastFallbackUsed.set(false);
-            return answer;
+            return result;
         } catch (Exception primaryEx) {
             if (shouldFallback(primaryEx) && !primaryModel.equalsIgnoreCase(fallbackModel)) {
                 log.warn("Primary chat model '{}' failed ({}) - attempting fallback model '{}'",
                         primaryModel, getSafeFailureDescription(primaryEx), fallbackModel);
                 try {
-                    String answer = callModel(fallbackModel, systemInstruction, userPrompt);
+                    GeminiChatResult result = runToolLoop(fallbackModel, systemInstruction, userPrompt, tools, toolExecutor);
                     lastAnsweredModel.set(fallbackModel);
                     lastFallbackUsed.set(true);
-                    return answer;
+                    return result;
                 } catch (RestClientResponseException fallbackRex) {
                     handleRestClientResponseException(fallbackRex);
                 } catch (Exception fallbackEx) {
@@ -140,45 +160,135 @@ public class GeminiChatClient {
         }
     }
 
-    private boolean shouldFallback(Throwable ex) {
-        if (ex instanceof RestClientResponseException rex) {
-            int code = rex.getStatusCode().value();
-            return code == 404 || code == 429 || code == 503;
+    private GeminiChatResult runToolLoop(
+            String model,
+            String systemInstruction,
+            String userPrompt,
+            List<Map<String, Object>> tools,
+            ToolExecutor toolExecutor) {
+
+        List<Object> contents = new ArrayList<>();
+        contents.add(Map.of(
+                "role", "user",
+                "parts", List.of(Map.of("text", userPrompt != null ? userPrompt : ""))
+        ));
+
+        List<String> toolsUsed = new ArrayList<>();
+        List<String> orderNumbersReferenced = new ArrayList<>();
+        int toolRounds = 0;
+
+        while (true) {
+            JsonNode responseNode = callModelRaw(model, systemInstruction, contents, tools);
+            JsonNode candidates = responseNode.path("candidates");
+            if (candidates.isMissingNode() || !candidates.isArray() || candidates.isEmpty()) {
+                throw new ChatServiceException("An error occurred while communicating with the chat model. Please try again.");
+            }
+
+            JsonNode contentNode = candidates.get(0).path("content");
+            JsonNode parts = contentNode.path("parts");
+            if (parts.isMissingNode() || !parts.isArray() || parts.isEmpty()) {
+                throw new ChatServiceException("An error occurred while communicating with the chat model. Please try again.");
+            }
+
+            // Find any function call parts
+            List<JsonNode> functionCallParts = new ArrayList<>();
+            for (JsonNode part : parts) {
+                if (part.has("functionCall")) {
+                    functionCallParts.add(part.get("functionCall"));
+                }
+            }
+
+            // If no function call, model completed its text answer
+            if (functionCallParts.isEmpty() || toolExecutor == null) {
+                String answer = extractAnswerText(responseNode);
+                return new GeminiChatResult(answer, toolsUsed, orderNumbersReferenced);
+            }
+
+            // Check 3-round loop limit
+            if (toolRounds >= 3) {
+                log.info("Tool calling exceeded max 3 rounds. Stopping loop gracefully.");
+                return new GeminiChatResult(
+                        "I am sorry, but I was unable to complete retrieving your order information within the allowed steps. Please check your order details or contact human support for assistance.",
+                        toolsUsed,
+                        orderNumbersReferenced
+                );
+            }
+
+            // CRITICAL FOR GEMINI 3.x / 3.5:
+            // Append the model's exact content object (preserves thought signatures, functionCall, and parts)
+            contents.add(contentNode);
+
+            // Execute each functionCall and collect functionResponse parts
+            List<Map<String, Object>> responseParts = new ArrayList<>();
+            for (JsonNode fnCall : functionCallParts) {
+                String fnName = fnCall.path("name").asText();
+                Map<String, Object> args = new LinkedHashMap<>();
+                JsonNode argsNode = fnCall.path("args");
+                if (argsNode != null && argsNode.isObject()) {
+                    argsNode.fields().forEachRemaining(entry -> {
+                        if (entry.getValue().isTextual()) {
+                            args.put(entry.getKey(), entry.getValue().asText());
+                        } else if (entry.getValue().isNumber()) {
+                            args.put(entry.getKey(), entry.getValue().numberValue());
+                        } else if (entry.getValue().isBoolean()) {
+                            args.put(entry.getKey(), entry.getValue().asBoolean());
+                        } else {
+                            args.put(entry.getKey(), entry.getValue().toString());
+                        }
+                    });
+                }
+
+                if (!toolsUsed.contains(fnName)) {
+                    toolsUsed.add(fnName);
+                }
+
+                // Log tool execution safely:
+                // "Do not log tool arguments with personal data beyond the order number, never log the full message, results or answer."
+                String orderNumArg = args.get("orderNumber") != null ? String.valueOf(args.get("orderNumber")) : null;
+                if (orderNumArg != null) {
+                    log.info("Invoking model tool '{}' for orderNumber: {}", fnName, orderNumArg);
+                } else {
+                    log.info("Invoking model tool '{}'", fnName);
+                }
+
+                ToolExecutionResult toolResult = toolExecutor.execute(fnName, args);
+                if (toolResult != null) {
+                    if (toolResult.referencedOrderNumbers() != null) {
+                        for (String ord : toolResult.referencedOrderNumbers()) {
+                            if (ord != null && !ord.isBlank() && !orderNumbersReferenced.contains(ord)) {
+                                orderNumbersReferenced.add(ord);
+                            }
+                        }
+                    }
+                    Map<String, Object> fnResponseMap = new LinkedHashMap<>();
+                    fnResponseMap.put("name", fnName);
+                    fnResponseMap.put("response", toolResult.responseData() != null ? toolResult.responseData() : Map.of());
+                    responseParts.add(Map.of("functionResponse", fnResponseMap));
+                }
+            }
+
+            // Add user turn containing functionResponse parts
+            contents.add(Map.of("role", "user", "parts", responseParts));
+            toolRounds++;
         }
-        return isTimeout(ex) || isConnectionClosedOrReset(ex);
     }
 
-    private String getSafeFailureDescription(Throwable ex) {
-        if (ex instanceof RestClientResponseException rex) {
-            return "HTTP " + rex.getStatusCode().value();
-        }
-        if (isTimeout(ex)) {
-            return "Read timeout";
-        }
-        if (isConnectionClosedOrReset(ex)) {
-            return "Connection closed/reset";
-        }
-        return "Communication failure";
-    }
-
-    private String callModel(String model, String systemInstruction, String userPrompt) {
+    private JsonNode callModelRaw(String model, String systemInstruction, List<Object> contents, List<Map<String, Object>> tools) {
         String modelName = model.startsWith("models/") ? model.substring(7) : model;
         String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent";
 
-        Map<String, Object> payload = buildRequestBody(systemInstruction, userPrompt);
+        Map<String, Object> payload = buildRequestBody(systemInstruction, contents, tools);
 
-        JsonNode responseNode = restClient.post()
+        return restClient.post()
                 .uri(endpoint)
                 .header("x-goog-api-key", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(payload)
                 .retrieve()
                 .body(JsonNode.class);
-
-        return extractAnswerText(responseNode);
     }
 
-    private Map<String, Object> buildRequestBody(String systemInstruction, String userPrompt) {
+    private Map<String, Object> buildRequestBody(String systemInstruction, List<Object> contents, List<Map<String, Object>> tools) {
         Map<String, Object> body = new LinkedHashMap<>();
 
         if (systemInstruction != null && !systemInstruction.isBlank()) {
@@ -187,12 +297,11 @@ public class GeminiChatClient {
             ));
         }
 
-        body.put("contents", List.of(
-                Map.of(
-                        "role", "user",
-                        "parts", List.of(Map.of("text", userPrompt != null ? userPrompt : ""))
-                )
-        ));
+        body.put("contents", contents);
+
+        if (tools != null && !tools.isEmpty()) {
+            body.put("tools", tools);
+        }
 
         Map<String, Object> generationConfig = new LinkedHashMap<>();
         generationConfig.put("temperature", this.temperature);
@@ -247,6 +356,27 @@ public class GeminiChatClient {
         }
 
         return answer;
+    }
+
+    private boolean shouldFallback(Throwable ex) {
+        if (ex instanceof RestClientResponseException rex) {
+            int code = rex.getStatusCode().value();
+            return code == 404 || code == 429 || code == 503;
+        }
+        return isTimeout(ex) || isConnectionClosedOrReset(ex);
+    }
+
+    private String getSafeFailureDescription(Throwable ex) {
+        if (ex instanceof RestClientResponseException rex) {
+            return "HTTP " + rex.getStatusCode().value();
+        }
+        if (isTimeout(ex)) {
+            return "Read timeout";
+        }
+        if (isConnectionClosedOrReset(ex)) {
+            return "Connection closed/reset";
+        }
+        return "Communication failure";
     }
 
     private void handleRestClientResponseException(RestClientResponseException ex) {
