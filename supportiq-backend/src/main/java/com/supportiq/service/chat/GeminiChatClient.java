@@ -175,6 +175,7 @@ public class GeminiChatClient {
 
         List<String> toolsUsed = new ArrayList<>();
         List<String> orderNumbersReferenced = new ArrayList<>();
+        com.supportiq.dto.TicketSummaryDto createdTicket = null;
         int toolRounds = 0;
 
         while (true) {
@@ -201,7 +202,7 @@ public class GeminiChatClient {
             // If no function call, model completed its text answer
             if (functionCallParts.isEmpty() || toolExecutor == null) {
                 String answer = extractAnswerText(responseNode);
-                return new GeminiChatResult(answer, toolsUsed, orderNumbersReferenced);
+                return new GeminiChatResult(answer, toolsUsed, orderNumbersReferenced, createdTicket);
             }
 
             // Check 3-round loop limit
@@ -210,7 +211,8 @@ public class GeminiChatClient {
                 return new GeminiChatResult(
                         "I am sorry, but I was unable to complete retrieving your order information within the allowed steps. Please check your order details or contact human support for assistance.",
                         toolsUsed,
-                        orderNumbersReferenced
+                        orderNumbersReferenced,
+                        createdTicket
                 );
             }
 
@@ -259,6 +261,9 @@ public class GeminiChatClient {
                                 orderNumbersReferenced.add(ord);
                             }
                         }
+                    }
+                    if (toolResult.createdTicket() != null) {
+                        createdTicket = toolResult.createdTicket();
                     }
                     Map<String, Object> fnResponseMap = new LinkedHashMap<>();
                     fnResponseMap.put("name", fnName);

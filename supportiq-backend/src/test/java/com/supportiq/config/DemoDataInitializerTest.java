@@ -3,8 +3,12 @@ package com.supportiq.config;
 import com.supportiq.model.Order;
 import com.supportiq.model.OrderStatus;
 import com.supportiq.model.Role;
+import com.supportiq.model.Ticket;
+import com.supportiq.model.TicketStatus;
 import com.supportiq.model.User;
 import com.supportiq.repository.OrderRepository;
+import com.supportiq.repository.TicketMessageRepository;
+import com.supportiq.repository.TicketRepository;
 import com.supportiq.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,14 +38,22 @@ class DemoDataInitializerTest {
     private OrderRepository orderRepository;
 
     @Autowired
+    private TicketRepository ticketRepository;
+
+    @Autowired
+    private TicketMessageRepository ticketMessageRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
-    @DisplayName("DemoDataInitializer must be idempotent: running multiple times never creates duplicates")
+    @DisplayName("DemoDataInitializer must be idempotent: running multiple times never creates duplicate orders or tickets")
     void testDemoDataInitializer_IsIdempotent() {
         DemoDataInitializer initializer = new DemoDataInitializer(
                 userRepository,
                 orderRepository,
+                ticketRepository,
+                ticketMessageRepository,
                 passwordEncoder
         );
 
@@ -52,9 +64,11 @@ class DemoDataInitializerTest {
                 .filter(u -> u.getRole() == Role.CUSTOMER)
                 .toList();
         List<Order> ordersFirstRun = orderRepository.findAll();
+        List<Ticket> ticketsFirstRun = ticketRepository.findAll();
 
         assertThat(demoCustomersFirstRun).hasSize(3);
         assertThat(ordersFirstRun).hasSize(12);
+        assertThat(ticketsFirstRun).hasSize(3);
 
         // Verify all 3 demo accounts have BCrypt-hashed password matching Demo@12345
         for (User customer : demoCustomersFirstRun) {
@@ -67,6 +81,17 @@ class DemoDataInitializerTest {
                 .collect(Collectors.toSet());
         assertThat(observedStatuses).containsAll(EnumSet.allOf(OrderStatus.class));
 
+        // Verify the 3 demo tickets
+        Ticket t1 = ticketRepository.findByTicketNumber("TKT-1001").orElseThrow();
+        assertThat(t1.getStatus()).isEqualTo(TicketStatus.OPEN);
+        assertThat(t1.getRelatedOrderNumber()).isEqualTo("1004");
+
+        Ticket t2 = ticketRepository.findByTicketNumber("TKT-1002").orElseThrow();
+        assertThat(t2.getStatus()).isEqualTo(TicketStatus.IN_PROGRESS);
+
+        Ticket t3 = ticketRepository.findByTicketNumber("TKT-1003").orElseThrow();
+        assertThat(t3.getStatus()).isEqualTo(TicketStatus.RESOLVED);
+
         // Run 2nd time (should be completely idempotent and not add anything)
         initializer.run();
 
@@ -74,12 +99,15 @@ class DemoDataInitializerTest {
                 .filter(u -> u.getRole() == Role.CUSTOMER)
                 .toList();
         List<Order> ordersSecondRun = orderRepository.findAll();
+        List<Ticket> ticketsSecondRun = ticketRepository.findAll();
 
         assertThat(demoCustomersSecondRun).hasSize(3);
         assertThat(ordersSecondRun).hasSize(12);
+        assertThat(ticketsSecondRun).hasSize(3);
 
         // Run 3rd time
         initializer.run();
         assertThat(orderRepository.count()).isEqualTo(12);
+        assertThat(ticketRepository.count()).isEqualTo(3);
     }
 }

@@ -74,6 +74,12 @@ app:
     max-output-tokens: ${CHAT_MAX_OUTPUT_TOKENS:1000}
     temperature: ${CHAT_TEMPERATURE:0.2}
     order-intent-keywords: ${APP_ORDER_INTENT_KEYWORDS:order,orders,track,tracking,parcel,package,delivery,delivered,shipped,status,kahan,kab aayega,ye order,mera order}
+  tickets:
+    daily-limit: ${APP_TICKETS_DAILY_LIMIT:5}
+  escalation:
+    high-keywords: ${APP_ESCALATION_HIGH_KEYWORDS:fraud,scam,cheated,damaged,broken,dhokha,toota,loot,fake,chor}
+    medium-keywords: ${APP_ESCALATION_MEDIUM_KEYWORDS:refund not received,refund,complaint,wrong item,manager,worst,angry,bekar,kharab,wapas nahi mila,not received,defective,gussa}
+    explicit-keywords: ${APP_ESCALATION_EXPLICIT_KEYWORDS:create a ticket,create ticket,raise a ticket,raise ticket,ticket banao,ticket bana do,ticket bana de,ticket kholo,open a ticket,open ticket,talk to a human,talk to human,speak to a human,speak to human,speak with a human,speak with human,human agent,real agent,live agent,insaan se baat,insan se baat,bande se baat,support se baat karao,support se baat karwao,agent se baat,customer care se baat,complaint register,register complaint,file a complaint,file complaint,raise a complaint,raise complaint}
   demo-data:
     # Default true for local use and automated testing. MUST be set to false for any production deployment!
     enabled: ${APP_DEMO_DATA_ENABLED:${DEMO_DATA_ENABLED:true}}

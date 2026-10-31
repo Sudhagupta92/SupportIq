@@ -18,4 +18,8 @@ AI-Powered Customer Support Agent for E-Commerce.
   - Backend implementation: [supportiq-backend/](supportiq-backend/)
   - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
   - Documentation: See [docs/MODULE5_EXPLANATION.md](docs/MODULE5_EXPLANATION.md).
+- **Module 6**: Support Tickets, Escalation & Admin Ticket Panel (Soft/Explicit Escalation, State Machine, Ownership Isolation, Rate Limit & Duplicate Protection).
+  - Backend implementation: [supportiq-backend/](supportiq-backend/)
+  - Frontend implementation: [supportiq-frontend/](supportiq-frontend/)
+  - Documentation: See [docs/MODULE6_EXPLANATION.md](docs/MODULE6_EXPLANATION.md).
 

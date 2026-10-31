@@ -42,6 +42,12 @@ app:
     max-output-tokens: 1000
     temperature: 0.2
     order-intent-keywords: order,orders,track,tracking,parcel,package,delivery,delivered,shipped,status,kahan,kab aayega,ye order,mera order
+  tickets:
+    daily-limit: 5
+  escalation:
+    high-keywords: fraud,scam,cheated,damaged,broken,dhokha,toota,loot,fake,chor
+    medium-keywords: refund not received,refund,complaint,wrong item,manager,worst,angry,bekar,kharab,wapas nahi mila,not received,defective,gussa
+    explicit-keywords: create a ticket,create ticket,raise a ticket,raise ticket,ticket banao,ticket bana do,ticket bana de,ticket kholo,open a ticket,open ticket,talk to a human,talk to human,speak to a human,speak to human,speak with a human,speak with human,human agent,real agent,live agent,insaan se baat,insan se baat,bande se baat,support se baat karao,support se baat karwao,agent se baat,customer care se baat,complaint register,register complaint,file a complaint,file complaint,raise a complaint,raise complaint
   demo-data:
     enabled: false
 

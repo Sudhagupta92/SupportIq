@@ -5,5 +5,6 @@ package com.supportiq.dto;
  */
 public enum ChatSourceType {
     POLICY,
-    ORDER
+    ORDER,
+    TICKET
 }

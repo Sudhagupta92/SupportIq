@@ -428,4 +428,28 @@ app:
 ### Admin Inspection Endpoint:
 - `GET /api/admin/orders?page=0&size=10`: Returns paginated orders for ADMIN role (max page size 50). Never exposes passwords or tokens.
 
+---
+
+## 🎫 Module 6: Support Tickets, Escalation & Admin Ticket Panel
+
+### New Endpoints:
+- `POST /api/tickets`: Create ticket or update existing for duplicate inquiry (authenticated customer)
+- `GET /api/tickets`: List own tickets (paginated, newest first)
+- `GET /api/tickets/{ticketNumber}`: Retrieve own ticket with message thread (404 for foreign tickets)
+- `POST /api/tickets/{ticketNumber}/messages`: Customer follow-up reply (reopens RESOLVED ticket to OPEN)
+- `GET /api/admin/tickets`: Admin list tickets (paginated, filters: status, priority, category, search)
+- `GET /api/admin/tickets/{ticketNumber}`: Admin ticket detail with customer name & email only
+- `POST /api/admin/tickets/{ticketNumber}/messages`: Admin support agent reply
+- `PATCH /api/admin/tickets/{ticketNumber}/status`: Admin status transition enforcing state machine
+
+### Tool Exposed to Model:
+- `create_support_ticket(summary, category, relatedOrderNumber)`: ONLY declared when customer explicitly requests a ticket or human agent in English or Hinglish. Computes priority on backend; strictly NO `userId` parameter in schema.
+
+### Test Coverage Highlights:
+- **`TicketControllerTest`**: Tests customer CRUD, rate limiting (5/24h), duplicate protection, foreign order number dropping, 404 ownership isolation.
+- **`AdminTicketControllerTest`**: Tests RBAC (403 for CUSTOMER, 200 for ADMIN), filtering, pagination max 50, status transitions, and data privacy.
+- **`ChatServiceModule6Test`**: Tests escalation detection (soft signals never create tickets, explicit request declares tool, pizza never calls model).
+- **`TicketToolServiceTest`**: Tests tool execution security, extra argument rejection, and duplicate open ticket handling.
+
+
 

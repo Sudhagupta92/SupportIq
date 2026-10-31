@@ -210,6 +210,42 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(response);
     }
 
+    @ExceptionHandler(TicketRateLimitException.class)
+    public ResponseEntity<ErrorResponse> handleTicketRateLimitException(
+            TicketRateLimitException ex,
+            HttpServletRequest request) {
+
+        log.warn("Ticket creation rate limited on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.TOO_MANY_REQUESTS.value())
+                .error(HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
+    }
+
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidStatusTransitionException(
+            InvalidStatusTransitionException ex,
+            HttpServletRequest request) {
+
+        log.warn("Invalid ticket status transition on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
     @ExceptionHandler(ChatRateLimitException.class)
     public ResponseEntity<ErrorResponse> handleChatRateLimitException(
             ChatRateLimitException ex,

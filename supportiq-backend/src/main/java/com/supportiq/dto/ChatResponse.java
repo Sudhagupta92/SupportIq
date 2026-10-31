@@ -23,4 +23,6 @@ public class ChatResponse {
     private List<ChatSource> sources = new ArrayList<>();
     @Builder.Default
     private List<String> toolsUsed = new ArrayList<>();
+    private EscalationDto escalation;
+    private TicketSummaryDto ticket;
 }

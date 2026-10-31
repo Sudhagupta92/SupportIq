@@ -10,6 +10,10 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ChatPage from './pages/ChatPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import CustomerTicketsPage from './pages/CustomerTicketsPage';
+import CustomerTicketDetailPage from './pages/CustomerTicketDetailPage';
+import AdminTicketsPage from './pages/AdminTicketsPage';
+import AdminTicketDetailPage from './pages/AdminTicketDetailPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -74,12 +78,46 @@ function App() {
             }
           />
 
-          {/* Admin Protected Route (Restricted to ADMIN role only) */}
+          {/* Customer Ticket Routes */}
+          <Route
+            path="/tickets"
+            element={
+              <ProtectedRoute>
+                <CustomerTicketsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tickets/:ticketNumber"
+            element={
+              <ProtectedRoute>
+                <CustomerTicketDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin Protected Routes (Restricted to ADMIN role only) */}
           <Route
             path="/admin"
             element={
               <ProtectedRoute allowedRoles={['ADMIN']}>
                 <AdminDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/tickets"
+            element={
+              <ProtectedRoute allowedRoles={['ADMIN']}>
+                <AdminTicketsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/tickets/:ticketNumber"
+            element={
+              <ProtectedRoute allowedRoles={['ADMIN']}>
+                <AdminTicketDetailPage />
               </ProtectedRoute>
             }
           />

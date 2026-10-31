@@ -9,6 +9,7 @@ import {
   X,
   Bot,
   User as UserIcon,
+  LifeBuoy,
 } from 'lucide-react';
 
 /**
@@ -73,10 +74,21 @@ const Navbar = () => {
                 <span>Chat</span>
               </NavLink>
 
-              {isAdmin && (
-                <NavLink to="/admin" className={navLinkClass}>
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Admin</span>
+              {isAdmin ? (
+                <>
+                  <NavLink to="/admin" end className={navLinkClass}>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Admin</span>
+                  </NavLink>
+                  <NavLink to="/admin/tickets" className={navLinkClass}>
+                    <LifeBuoy className="w-4 h-4" />
+                    <span>Tickets</span>
+                  </NavLink>
+                </>
+              ) : (
+                <NavLink to="/tickets" className={navLinkClass}>
+                  <LifeBuoy className="w-4 h-4" />
+                  <span>My Tickets</span>
                 </NavLink>
               )}
             </nav>
@@ -172,14 +184,34 @@ const Navbar = () => {
               <span>Chat</span>
             </NavLink>
 
-            {isAdmin && (
+            {isAdmin ? (
+              <>
+                <NavLink
+                  to="/admin"
+                  end
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={mobileNavLinkClass}
+                >
+                  <ShieldCheck className="w-5 h-5 text-purple-600" />
+                  <span>Admin Dashboard</span>
+                </NavLink>
+                <NavLink
+                  to="/admin/tickets"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={mobileNavLinkClass}
+                >
+                  <LifeBuoy className="w-5 h-5 text-purple-600" />
+                  <span>Tickets</span>
+                </NavLink>
+              </>
+            ) : (
               <NavLink
-                to="/admin"
+                to="/tickets"
                 onClick={() => setMobileMenuOpen(false)}
                 className={mobileNavLinkClass}
               >
-                <ShieldCheck className="w-5 h-5 text-purple-600" />
-                <span>Admin Dashboard</span>
+                <LifeBuoy className="w-5 h-5 text-indigo-600" />
+                <span>My Tickets</span>
               </NavLink>
             )}
           </div>

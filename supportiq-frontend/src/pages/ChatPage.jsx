@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+import CreateTicketModal from '../components/CreateTicketModal';
 import { useAuth } from '../context/AuthContext';
 import { sendChatMessageApi } from '../api/chatApi';
 import {
@@ -15,6 +17,8 @@ import {
   User as UserIcon,
   Package,
   Info,
+  LifeBuoy,
+  CheckCircle2,
 } from 'lucide-react';
 
 /**
@@ -57,6 +61,10 @@ const ChatPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showSlowHint, setShowSlowHint] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+
+  // Ticket creation modal state
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+  const [ticketModalData, setTicketModalData] = useState({});
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -120,12 +128,28 @@ const ChatPage = () => {
     try {
       const response = await sendChatMessageApi(query);
 
+      // Assemble sources and ensure TICKET chip is represented if created via tool
+      let sources = response.sources ? [...response.sources] : [];
+      if (response.ticket && response.ticket.ticketNumber) {
+        const ticketLabel = `Ticket #${response.ticket.ticketNumber}`;
+        if (!sources.some((s) => s.type === 'TICKET' || s.label === ticketLabel)) {
+          sources.push({
+            type: 'TICKET',
+            label: ticketLabel,
+            ticketNumber: response.ticket.ticketNumber,
+          });
+        }
+      }
+
       const assistantMessage = {
         id: generateId(),
         role: 'assistant',
         text: response.answer,
         answered: response.answered,
-        sources: response.sources || [],
+        sources,
+        escalation: response.escalation || null,
+        ticket: response.ticket || null,
+        userQuery: query,
         timestamp: formatTime(),
       };
 
@@ -178,6 +202,63 @@ const ChatPage = () => {
     if (!isLoading && !isSendingRef.current) {
       handleSendMessage(question);
     }
+  };
+
+  const extractRelatedOrder = (msg) => {
+    if (msg?.sources) {
+      for (const s of msg.sources) {
+        if (s.type === 'ORDER' && s.label) {
+          const m = s.label.match(/\b(\d{3,12})\b/);
+          if (m) return m[1];
+        }
+      }
+    }
+    if (msg?.userQuery) {
+      const m = msg.userQuery.match(/\b(10\d\d|\d{3,12})\b/);
+      if (m) return m[1];
+    }
+    return '';
+  };
+
+  const handleOpenTicketModal = (msg) => {
+    const relatedOrder = extractRelatedOrder(msg);
+    setTicketModalData({
+      messageId: msg.id,
+      description: msg.userQuery || '',
+      escalation: msg.escalation || {},
+      relatedOrderNumber: relatedOrder,
+    });
+    setIsTicketModalOpen(true);
+  };
+
+  const handleTicketCreatedSuccess = (result) => {
+    if (!result) return;
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id === ticketModalData.messageId) {
+          const ticketLabel = `Ticket #${result.ticketNumber}`;
+          const updatedSources = [...(m.sources || [])];
+          if (!updatedSources.some((s) => s.type === 'TICKET' || s.label === ticketLabel)) {
+            updatedSources.push({
+              type: 'TICKET',
+              label: ticketLabel,
+              ticketNumber: result.ticketNumber,
+            });
+          }
+          return {
+            ...m,
+            ticket: {
+              ticketNumber: result.ticketNumber,
+              subject: result.subject,
+              existing: result.existing,
+            },
+            ticketCreated: true,
+            sources: updatedSources,
+          };
+        }
+        return m;
+      })
+    );
   };
 
   return (
@@ -310,6 +391,34 @@ const ChatPage = () => {
 
                       <p>{msg.text}</p>
 
+                      {/* Friendly note when ticket already open */}
+                      {msg.ticket?.existing && (
+                        <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>Ticket {msg.ticket.ticketNumber} is already open, we added your note.</span>
+                        </div>
+                      )}
+
+                      {/* Escalation Prompt Box: shown when escalation suggested and no ticket created */}
+                      {msg.role === 'assistant' &&
+                        msg.escalation?.suggested === true &&
+                        !msg.ticket &&
+                        !msg.ticketCreated && (
+                          <div className="mt-3 p-3 rounded-xl bg-violet-50/90 border border-violet-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
+                            <div className="flex items-center gap-2 text-violet-900">
+                              <LifeBuoy className="w-4 h-4 text-violet-600 shrink-0" />
+                              <span className="text-xs font-semibold">Need a human to look at this?</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenTicketModal(msg)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs transition-colors cursor-pointer"
+                            >
+                              <span>Create support ticket</span>
+                            </button>
+                          </div>
+                      )}
+
                       {/* Source Citations */}
                       {msg.sources && msg.sources.length > 0 && (
                         <div className="mt-3 pt-2.5 border-t border-slate-100">
@@ -318,12 +427,39 @@ const ChatPage = () => {
                           </span>
                           <div className="flex flex-wrap gap-1.5">
                             {msg.sources.map((source, idx) => {
-                              const isOrder = source.type === 'ORDER' || (!source.filename && source.label);
+                              const isTicket =
+                                source.type === 'TICKET' ||
+                                (source.label && source.label.startsWith('Ticket #'));
+
+                              if (isTicket) {
+                                const tktNum =
+                                  source.ticketNumber ||
+                                  (source.label ? source.label.replace('Ticket #', '').trim() : '');
+                                const targetUrl =
+                                  user?.role === 'ADMIN'
+                                    ? `/admin/tickets/${encodeURIComponent(tktNum)}`
+                                    : `/tickets/${encodeURIComponent(tktNum)}`;
+
+                                return (
+                                  <Link
+                                    key={idx}
+                                    to={targetUrl}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-violet-50 text-violet-900 border border-violet-200 hover:bg-violet-100/90 transition-colors shadow-2xs"
+                                    title={`Support Ticket: ${source.label}`}
+                                  >
+                                    <LifeBuoy className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                                    <span>{source.label}</span>
+                                  </Link>
+                                );
+                              }
+
+                              const isOrder =
+                                source.type === 'ORDER' || (!source.filename && source.label);
                               if (isOrder) {
                                 return (
                                   <span
                                     key={idx}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100/80 transition-colors shadow-xs"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100/80 transition-colors shadow-2xs"
                                     title={`Order Reference: ${source.label}`}
                                   >
                                     <Package className="w-3.5 h-3.5 text-amber-600 shrink-0" />
@@ -466,6 +602,14 @@ const ChatPage = () => {
           </div>
         </div>
       </main>
+
+      {/* Create Ticket Modal */}
+      <CreateTicketModal
+        isOpen={isTicketModalOpen}
+        onClose={() => setIsTicketModalOpen(false)}
+        initialData={ticketModalData}
+        onSuccess={handleTicketCreatedSuccess}
+      />
     </div>
   );
 };

@@ -143,3 +143,20 @@ Use this checklist to verify that all Module 2 features function as expected:
 - [ ] **Mobile Responsiveness**: Resize the browser window to mobile width (<768px). Confirm the hamburger icon appears and opens the drawer with navigation links, user details, and logout button.
 - [ ] **Session Persistence**: Refresh the browser page (`F5`). Verify the loading spinner displays briefly while `GET /api/auth/me` verifies the token, and the session remains intact without logging out.
 - [ ] **Logout**: Click the "Logout" button. Confirm the session token is removed from storage and you are redirected to `/login`.
+
+---
+
+## 🎫 Module 6: Support Tickets & Admin Ticket Management
+
+### New Pages:
+- `/tickets`: Customer tickets list with status and priority badges, relative timestamps, and "Raise Ticket" modal.
+- `/tickets/:ticketNumber`: Full ticket conversation thread, real-time replies, auto-reopening on customer reply, and audit trail pills.
+- `/admin/tickets`: Admin ticket triage console with status, priority, category filters, search input, and paginated table.
+- `/admin/tickets/:ticketNumber`: Admin ticket management console with status transition selector (restricting only valid next states) and agent replies.
+
+### Chat Integration:
+- **Soft Escalation Prompt**: When `response.escalation.suggested` is true, renders "Need a human to look at this? [Create support ticket]".
+- **Create Support Ticket Modal**: Opens prefilled with subject, category, priority, customer question, and related order number.
+- **TICKET Chips**: Violet badges displayed in citations for created tickets (linking directly to ticket thread).
+- **Duplicate Notice**: Displays friendly banner `"Ticket TKT-XXXX is already open, we added your note."` when duplicate protection attaches note to an existing ticket.
+

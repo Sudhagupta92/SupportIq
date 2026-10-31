@@ -40,10 +40,10 @@ public class OrderToolService {
     private final OrderRepository orderRepository;
 
     /**
-     * Builds the tool declarations following the Google Gemini REST specification.
+     * Builds the function declarations following the Google Gemini REST specification.
      * Note: Absolutely no userId, customerId, or email parameters are exposed.
      */
-    public List<Map<String, Object>> getToolDeclarations() {
+    public List<Map<String, Object>> getFunctionDeclarations() {
         Map<String, Object> getOrderStatusDeclaration = new LinkedHashMap<>();
         getOrderStatusDeclaration.put("name", TOOL_GET_ORDER_STATUS);
         getOrderStatusDeclaration.put("description",
@@ -68,8 +68,16 @@ public class OrderToolService {
                 "properties", Collections.emptyMap()
         ));
 
+        return List.of(getOrderStatusDeclaration, listMyRecentOrdersDeclaration);
+    }
+
+    /**
+     * Builds the tool declarations following the Google Gemini REST specification.
+     * Note: Absolutely no userId, customerId, or email parameters are exposed.
+     */
+    public List<Map<String, Object>> getToolDeclarations() {
         return List.of(Map.of(
-                "functionDeclarations", List.of(getOrderStatusDeclaration, listMyRecentOrdersDeclaration)
+                "functionDeclarations", getFunctionDeclarations()
         ));
     }
 

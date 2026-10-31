@@ -72,7 +72,7 @@ class ChatServiceDecisionTest {
                 .build();
 
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
-        when(orderToolService.getToolDeclarations()).thenReturn(List.of(Map.of("name", "dummyTool")));
+        when(orderToolService.getFunctionDeclarations()).thenReturn(List.of(Map.of("name", "dummyTool")));
 
         when(geminiChatClient.generateContentWithTools(
                 eq(ChatService.SYSTEM_INSTRUCTION_COMBINED),
@@ -127,7 +127,7 @@ class ChatServiceDecisionTest {
                 .build();
 
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
-        when(orderToolService.getToolDeclarations()).thenReturn(List.of(Map.of("name", "dummyTool")));
+        when(orderToolService.getFunctionDeclarations()).thenReturn(List.of(Map.of("name", "dummyTool")));
 
         when(geminiChatClient.generateContentWithTools(
                 eq(ChatService.SYSTEM_INSTRUCTION_ORDER_ONLY),
